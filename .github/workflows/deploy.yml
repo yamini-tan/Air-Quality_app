@@ -1,6 +1,8 @@
 name: Test & deploy to EC2
 
-# PR opened/updated  -> "Core functionality check" (shows as a check on the PR)
+# PR opened/updated  -> "Core functionality check" only. A PR NEVER touches production:
+#                       the deploy job is skipped, and the EC2 secrets live in the "production"
+#                       environment, which GitHub only releases to jobs running on main.
 # PR merged to main  -> same check, then automatic deploy to the EC2 + live check,
 #                       with automatic rollback to the previous version if the live check fails
 on:
@@ -44,10 +46,13 @@ jobs:
   deploy:
     name: Deploy to EC2
     needs: test
-    if: github.event_name != 'pull_request'
+    # only a merge/push to main (or a manual run started on main) may deploy
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production
+    environment:
+      name: production   # secrets only available to main (deployment branch policy)
+      url: http://13.205.111.95:5000
     env:
       TARGET: ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}
       APP: /home/ubuntu/air-quality-aws
