@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+{% block title %}Live dashboard{% endblock %}
+{% block style %}
+  .top{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--sp2);flex-wrap:wrap;margin-bottom:var(--sp3)}
+
+  /* device status panel */
+  .device{display:grid;grid-template-columns:auto 1fr auto;gap:var(--sp3);align-items:center;margin-bottom:var(--sp3);
+          border-left:4px solid var(--muted)}
+  .device .big{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--muted-bg);color:var(--muted)}
+  .device .big .ico{width:28px;height:28px}
+  .device .head{font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .device .desc{color:var(--ink2);font-size:13.5px;margin-top:2px}
+  .device .facts{display:flex;flex-wrap:wrap;gap:6px 24px;font-size:12.5px;min-width:0}
+  .device .facts>div{min-width:0}
+  .device .facts dd{overflow-wrap:anywhere}
+  .device .facts dt{color:var(--muted)} .device .facts dd{font-family:var(--mono);color:var(--ink)}
+  .device.online{border-left-color:var(--ok)} .device.online .big{background:var(--ok-soft);color:var(--ok)}
+  .device.delayed{border-left-color:var(--warn)} .device.delayed .big{background:var(--warn-soft);color:var(--warn)}
+  .device.offline,.device.never,.device.unreachable{border-left-color:var(--bad)}
+  .device.offline .big,.device.never .big,.device.unreachable .big{background:var(--bad-soft);color:var(--bad)}
+  @media(max-width:900px){.device{grid-template-columns:auto minmax(0,1fr)}.device .facts{grid-column:1/-1}}
+
+  /* stale data: never present old telemetry as live */
+  .stale-note{display:none}
+  body.stale .live-val{opacity:.55}
+  body.stale .stale-note{display:inline-flex}
+
+  .aqi-hero{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:var(--sp2)}
+  .aqi-main{display:flex;gap:22px;align-items:center;min-width:0}
+  .aqi-hero>*{min-width:0}
+  .gauge{--p:0;--c:#94A3B8;width:156px;height:156px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+         background:conic-gradient(var(--c) calc(var(--p)*1%),rgba(148,163,184,.14) 0)}
+  .gauge>div{width:124px;height:124px;border-radius:50%;background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .gauge b{font-family:var(--mono);font-size:42px;line-height:1;font-weight:600}
+  .gauge span{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.6px}
+  .catname{font-size:22px;font-weight:700;margin:4px 0 6px;display:flex;align-items:center;gap:8px}
+  .subidx{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .subidx div{background:var(--muted-bg);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--muted)}
+  .subidx b{display:block;font-size:18px;color:var(--ink);font-family:var(--mono);font-weight:500}
+  .mini{display:flex;flex-direction:column;gap:var(--sp2)}
+  .mini .card{padding:14px 16px;flex:1}
+  .mini .val{font-size:30px;font-weight:600;font-family:var(--mono);line-height:1.2;margin-top:4px}
+  .klabel{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .klabel .ico{width:15px;height:15px}
+  .bar{height:8px;background:rgba(148,163,184,.14);border-radius:999px;overflow:hidden;margin:10px 0 8px}
+  .bar div{height:100%;background:var(--ok);border-radius:999px;transition:width .4s ease-out}
+
+  .sensor{position:relative;display:flex;flex-direction:column}
+  .sensor .ic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--muted-bg);color:var(--brand);margin-bottom:10px}
+  .sensor .name{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+  .sensor .qty{font-size:13.5px;font-weight:500;margin:2px 0 10px;min-height:40px;color:var(--ink2)}
+  .sensor .v{font-size:28px;font-weight:600;font-family:var(--mono)}
+  .sensor .u{font-size:13px;color:var(--muted);margin-left:4px}
+  .sensor .ex{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+  .sensor .ex b{font-family:var(--mono);color:var(--ink2);font-weight:500}
+  .sensor .tag{position:absolute;top:16px;right:16px}
+  .sensor.na .v{color:var(--muted);font-size:15px;font-family:var(--sans);font-weight:500}
+  .sgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));margin-top:var(--sp2)}
+  .group-title{font-size:12px;font-weight:700;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.6px}
+  .h2row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:var(--sp2)}
+  .h2row h2{margin:0}
+  .sec{margin-top:var(--sp5)}
+  @media(max-width:1100px){.aqi-hero{grid-template-columns:repeat(2,minmax(0,1fr))}.aqi-hero>.card:first-child{grid-column:1/-1}}
+  @media(max-width:640px){.aqi-hero{grid-template-columns:minmax(0,1fr)}.aqi-main{flex-direction:column;align-items:flex-start}}
+{% endblock %}
+{% block content %}
+<div class="top">
+  <div>
+    <h1>Indoor air quality</h1>
+    <div class="sub">CPCB-method AQI · refreshes every 5 s · all times IST</div>
+  </div>
+</div>
+
+<section class="card device never" id="device" aria-labelledby="dev-head">
+  <div class="big" id="dev-icon"><svg class="ico" aria-hidden="true"><use href="#i-wifi-off"/></svg></div>
+  <div>
+    <div class="head" id="dev-head">Checking sensor node…</div>
+    <div class="desc" id="dev-desc">Contacting the server.</div>
+  </div>
+  <dl class="facts">
+    <div><dt>Last reading</dt><dd id="dev-last">–</dd></div>
+    <div><dt>Device</dt><dd id="dev-id">–</dd></div>
+    <div><dt>Data path</dt><dd id="dev-src">–</dd></div>
+    <div><dt>Offline after</dt><dd id="dev-thr">30 s</dd></div>
+  </dl>
+</section>
+
+<div id="alerts"></div>
+
+<div class="aqi-hero">
+  <div class="card">
+    <div class="aqi-main">
+      <div class="gauge live-val" id="gauge" role="img" aria-label="AQI no data"><div><b id="aqi">–</b><span>AQI</span></div></div>
+      <div>
+        <div class="klabel" id="rtlabel">Real-time indoor AQI · 1-min means · drives the fan</div>
+        <div class="catname live-val" id="catname">No data</div>
+        <div class="sub">Dominant: <b id="dominant" style="color:var(--ink)">–</b>
+          <span class="pill warn stale-note" style="margin-left:6px">Last known value</span></div>
+        <div class="subidx" id="subidx">
+          <div>PM2.5 sub-index<b id="sub_pm">–</b></div>
+          <div>CO sub-index<b id="sub_co">–</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="card">
+      <div class="klabel"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg>Hourly indicative AQI · 1-h means</div>
+      <div class="val live-val" id="aqi_h">–</div><div class="small" id="aqi_h_cat">–</div>
+    </div>
+    <div class="card">
+      <div class="klabel"><svg class="ico" aria-hidden="true"><use href="#i-gauge"/></svg>CPCB-aligned AQI · 24-h PM2.5, 8-h CO</div>
+      <div class="val live-val" id="aqi_c">–</div><div class="small" id="aqi_c_cat">–</div>
+    </div>
+  </div>
+  <div class="mini">
+    <div class="card">
+      <div class="klabel"><svg class="ico" aria-hidden="true"><use href="#i-fan"/></svg>HEPA purifier fan</div>
+      <div class="val live-val" id="fan_name" style="font-family:var(--sans);font-size:22px">–</div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="fan_pb"><div id="fan_bar" style="width:0%"></div></div>
+      <div class="small"><b id="fan_duty" class="mono">0</b>% duty · Stage <b id="fan_stage" class="mono">0</b></div>
+      <div class="small muted" id="fan_reason"></div>
+    </div>
+    <div class="card">
+      <div class="klabel"><svg class="ico" aria-hidden="true"><use href="#i-sparkle"/></svg>12-hour forecast · <span id="fc_model">best model</span></div>
+      <div class="val" id="fc_val">–</div><div class="small" id="fc_cat">–</div>
+      <a class="small" href="/forecast">Compare all models →</a>
+    </div>
+  </div>
+</div>
+
+<h2 class="sec"><svg class="ico" aria-hidden="true"><use href="#i-cpu"/></svg>Sensor readings</h2>
+<div class="sub">PM2.5 is shown after humidity correction; CO is converted from ppm to mg/m³ with the measured temperature and pressure.</div>
+<div id="sensors"></div>
+
+<div class="h2row sec">
+  <h2><svg class="ico" aria-hidden="true"><use href="#i-chart"/></svg>Trends</h2>
+  <div class="seg" id="range" role="group" aria-label="Time range">
+    <button data-h="1" aria-pressed="false">1 h</button><button data-h="6" aria-pressed="false">6 h</button>
+    <button data-h="24" class="active" aria-pressed="true">24 h</button><button data-h="168" aria-pressed="false">7 d</button>
+  </div>
+</div>
+<div class="sub" style="margin:-4px 0 12px">Averaged per <span id="res">–</span>. Hover or focus a chart to read values. Gaps mean no data.</div>
+<div class="grid g2">
+  <div class="card"><h3>AQI</h3><div class="chartbox"><canvas id="c_aqi" aria-label="AQI trend chart" role="img"></canvas></div></div>
+  <div class="card"><h3>PM2.5 corrected (µg/m³)</h3><div class="chartbox"><canvas id="c_pm" aria-label="PM2.5 trend chart" role="img"></canvas></div></div>
+  <div class="card"><h3>Carbon monoxide (mg/m³)</h3><div class="chartbox"><canvas id="c_co" aria-label="CO trend chart" role="img"></canvas></div></div>
+  <div class="card"><h3>Temperature (°C)</h3><div class="chartbox"><canvas id="c_t" aria-label="Temperature trend chart" role="img"></canvas></div></div>
+  <div class="card"><h3>Relative humidity (%)</h3><div class="chartbox"><canvas id="c_rh" aria-label="Humidity trend chart" role="img"></canvas></div></div>
+  <div class="card"><h3>Gas index MQ-135 &amp; dust GP2Y1010 (ADC counts)</h3><div class="chartbox"><canvas id="c_sup" aria-label="Gas and dust trend chart" role="img"></canvas></div></div>
+</div>
+
+<div class="h2row sec">
+  <h2><svg class="ico" aria-hidden="true"><use href="#i-leaf"/></svg>Lifetime AQI</h2>
+  <div class="seg" id="lrange" role="group" aria-label="Lifetime range">
+    <button data-d="30" class="active" aria-pressed="true">30 d</button><button data-d="90" aria-pressed="false">90 d</button><button data-d="0" aria-pressed="false">All</button>
+  </div>
+</div>
+<div class="card">
+  <div class="sub" style="margin-bottom:8px">Daily mean and maximum of the real-time AQI. Raw readings are kept for 10 days; AQI values are kept forever.</div>
+  <div class="chartbox"><canvas id="c_life" aria-label="Lifetime daily AQI chart" role="img"></canvas></div>
+</div>
+
+<h2 class="sec"><svg class="ico" aria-hidden="true"><use href="#i-fan"/></svg>Purification performance</h2>
+<div class="grid g2">
+  <div class="card">
+    <h3>Theoretical decay (H13, η = 0.9995)</h3>
+    <div class="tablewrap"><table id="t_pur"></table></div>
+    <div class="small muted" style="margin-top:8px">k = ηQ/V, t₅₀ = ln2/k, t₉₀ = ln10/k. Natural losses neglected.</div>
+  </div>
+  <div class="card">
+    <h3>Last measured fan-on run</h3>
+    <div id="lastrun" class="sub">No fan-on run recorded yet.</div>
+  </div>
+</div>
+
+<h2 class="sec"><svg class="ico" aria-hidden="true"><use href="#i-table"/></svg>Recent records</h2>
+<div class="card">
+  <div class="tablewrap"><table id="t_recent"><tr><td class="muted">No readings yet.</td></tr></table></div>
+</div>
+
+<h2 class="sec"><svg class="ico" aria-hidden="true"><use href="#i-book"/></svg>Reference</h2>
+<div class="grid g2">
+  <div class="card"><h3>CPCB breakpoints</h3><div class="tablewrap">
+    <table><tr><th>AQI</th><th>Category</th><th>PM2.5 24-h (µg/m³)</th><th>CO 8-h (mg/m³)</th></tr>
+      <tr><td class="mono">0–50</td><td><span class="catdot"><i style="background:#22C55E"></i>Good</span></td><td class="mono">0–30</td><td class="mono">0–1.0</td></tr>
+      <tr><td class="mono">51–100</td><td><span class="catdot"><i style="background:#84CC16"></i>Satisfactory</span></td><td class="mono">31–60</td><td class="mono">1.1–2.0</td></tr>
+      <tr><td class="mono">101–200</td><td><span class="catdot"><i style="background:#EAB308"></i>Moderately Polluted</span></td><td class="mono">61–90</td><td class="mono">2.1–10</td></tr>
+      <tr><td class="mono">201–300</td><td><span class="catdot"><i style="background:#F97316"></i>Poor</span></td><td class="mono">91–120</td><td class="mono">10.1–17</td></tr>
+      <tr><td class="mono">301–400</td><td><span class="catdot"><i style="background:#EF4444"></i>Very Poor</span></td><td class="mono">121–250</td><td class="mono">17.1–34</td></tr>
+      <tr><td class="mono">401–500</td><td><span class="catdot"><i style="background:#B91C1C"></i>Severe</span></td><td class="mono">&gt;250</td><td class="mono">&gt;34</td></tr></table></div></div>
+  <div class="card"><h3>Fan control thresholds</h3><div class="tablewrap">
+    <table><tr><th>Stage</th><th>Condition</th><th class="num">Duty</th></tr>
+      <tr><td>0 · Standby</td><td>AQI &lt; 90 for 10 min</td><td class="num">0 %</td></tr>
+      <tr><td>1 · Low / pre-emptive</td><td>101 ≤ AQI &lt; 130, or forecast ≥ 130</td><td class="num">50 %</td></tr>
+      <tr><td>2 · Full purification</td><td>AQI ≥ 130</td><td class="num">100 %</td></tr></table></div>
+    <div class="small muted" style="margin-top:8px">Thresholds are project design parameters, distinct from the CPCB categories.</div></div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+let HOURS = 24, LDAYS = 30, charts = {};
+const roleClass = r => r.startsWith("CPCB") ? "pol" : (r.startsWith("Supp") ? "sup" : "ctx");
+const SICON = {pm25:"wind", co_mg:"flame", mq135:"flask", gpy10:"dust", temperature:"thermo", humidity:"droplet", pressure:"gauge"};
+
+/* ---------- device status panel (driven by base.html's shared poller) ---------- */
+const SRC = {legacy_api:"aislyntech PHP API", esp32:"Direct POST /api/ingest"};
+onDevice((st, s, info) => {
+  const box = document.getElementById("device");
+  box.className = "card device " + st;
+  document.body.classList.toggle("stale", st !== "online" && st !== "never");
+  const head = {online:"Sensor node online", delayed:"Signal delayed", offline:"Sensor node offline",
+                never:"Waiting for the first reading", unreachable:"Cannot reach the server"}[st];
+  const desc = {
+    online:  `Receiving data · last reading ${ago(s)}.`,
+    delayed: `No reading for ${ago(s).replace(" ago","")}. The node may be reconnecting to Wi-Fi.`,
+    offline: `No data since ${info?.last_reading_at ?? "–"} IST (${ago(s)}). Values below are the last known readings, not live.`,
+    never:   "The server is up but has not received any reading yet. Power on the ESP32.",
+    unreachable: "The dashboard cannot contact the server. Check your network or the EC2 instance."}[st];
+  const ic = {online:"wifi", delayed:"clock", offline:"wifi-off", never:"wifi-off", unreachable:"server"}[st];
+  const h = document.getElementById("dev-head");
+  const pill = st==="online" ? '<span class="pill on"><span class="dot"></span>LIVE</span>' : "";
+  if (h.dataset.st !== st){ h.dataset.st = st; document.getElementById("dev-icon").innerHTML = icon(ic); }
+  h.innerHTML = esc(head) + pill;
+  let d = desc; if (st !== "online" && info?.detail) d += " " + info.detail + ".";
+  document.getElementById("dev-desc").textContent = d;
+  document.getElementById("dev-last").textContent = info?.last_reading_at ? info.last_reading_at.slice(5) : "–";
+  document.getElementById("dev-id").textContent = info?.device_id ?? "–";
+  document.getElementById("dev-src").textContent = SRC[info?.source] ?? info?.source ?? "–";
+  document.getElementById("dev-thr").textContent = (info?.offline_after_s ?? 30) + " s";
+});
+
+/* ---------- sensors ---------- */
+function renderSensors(sensors, rd){
+  const groups = [["CPCB pollutants (enter the AQI)", s => s.role.startsWith("CPCB")],
+                  ["Supplementary (forecasting features)", s => s.role.startsWith("Supp")],
+                  ["Context / correction", s => s.role.startsWith("Context")]];
+  let html = '<div class="grid sgrid">';
+  for (const [title, f] of groups){
+    for (const s of sensors.filter(f)){
+      const v = rd[s.key], na = v==null;
+      const d = s.unit.includes("ADC") ? 0 : (s.key==="co_mg" ? 2 : 1);
+      const ex = s.extra.map(e => `${esc(e.label)}: <b>${fmt(rd[e.key],1)}</b> ${esc(e.unit)}`).join("<br>");
+      html += `<div class="card sensor${na?" na":""}"><span class="tag ${roleClass(s.role)}">${esc(s.role)}</span>
+        <div class="ic">${icon(SICON[s.key] || "activity")}</div><div class="name">${esc(s.sensor)}</div>
+        <div class="qty">${esc(s.quantity)}</div>
+        <div class="live-val">${na ? `<span class="v">No signal</span>` : `<span class="v">${fmt(v,d)}</span><span class="u">${esc(s.unit)}</span>`}</div>
+        <div class="ex">${na && s.role.startsWith("CPCB") ? "Sensor not detected in the latest frame." : (ex || "&nbsp;")}</div></div>`;
+    }
+  }
+  html += "</div>";
+  document.getElementById("sensors").innerHTML = html;
+}
+
+function setAQI(idVal, idCat, a, extra=""){
+  document.getElementById(idVal).textContent = a.aqi ?? "–";
+  document.getElementById(idCat).innerHTML = a.aqi==null ? '<span class="muted">No data</span>' :
+    `<span class="catdot"><i style="background:${a.color}"></i>${esc(a.category)}</span> <span class="muted">· ${esc(a.dominant ?? "")}</span> ${extra}`;
+}
+
+async function refreshLatest(){
+  let j;
+  try { j = await getJSON("/api/latest"); } catch(e){ return; }
+  if (j.device) setDevice(j.device);
+  if (!j.success) return;
+  const rd = j.reading, rt = j.aqi.realtime;
+  document.getElementById("aqi").textContent = rt.aqi ?? "–";
+  const g = document.getElementById("gauge");
+  g.style.setProperty("--p", rt.aqi==null ? 0 : Math.min(100, rt.aqi/5));
+  g.style.setProperty("--c", rt.color);
+  g.setAttribute("aria-label", rt.aqi==null ? "AQI no data" : `AQI ${rt.aqi}, ${rt.category}`);
+  const cn = document.getElementById("catname");
+  cn.innerHTML = `<span class="catdot"><i style="background:${rt.color}"></i></span>${esc(rt.category)}`;
+  cn.style.color = rt.color;
+  document.getElementById("dominant").textContent = rt.dominant ?? "–";
+  document.getElementById("rtlabel").textContent = rt.label;
+  const deviceAqi = (rt.dominant || "").startsWith("Dust");
+  document.getElementById("subidx").innerHTML = deviceAqi
+    ? `<div style="max-width:280px">Source<b style="font-size:13px;font-family:var(--sans)">Device dust AQI (no PM2.5/CO sensor)</b></div>`
+    : `<div>PM2.5 sub-index<b>${fmt(rt.sub_pm25,0)}</b></div><div>CO sub-index<b>${fmt(rt.sub_co,0)}</b></div>`;
+  setAQI("aqi_h","aqi_h_cat", j.aqi.hourly);
+  const c = j.aqi.cpcb;
+  setAQI("aqi_c","aqi_c_cat", c, `<br><span class="muted">coverage: PM ${c.pm_hours}/24 h, CO ${c.co_hours}/8 h</span>`);
+  const f = j.fan;
+  document.getElementById("fan_name").textContent = f.name;
+  document.getElementById("fan_bar").style.width = f.duty + "%";
+  document.getElementById("fan_pb").setAttribute("aria-valuenow", f.duty);
+  document.getElementById("fan_duty").textContent = f.duty;
+  document.getElementById("fan_stage").textContent = f.stage;
+  document.getElementById("fan_reason").textContent = f.reason;
+  document.getElementById("fc_model").textContent = j.forecast.best_model || "best model";
+  const fv = j.forecast.value, fc = cat(fv);
+  document.getElementById("fc_val").textContent = fv==null ? "–" : Math.round(fv);
+  document.getElementById("fc_cat").innerHTML = fv==null ? '<span class="muted">Forecast refreshes every 60 s</span>'
+    : `<span class="catdot"><i style="background:${fc[1]}"></i>${fc[0]}</span>`;
+  renderSensors(j.sensors, rd);
+  const al = [];
+  if (rd.alert && j.online) rd.alert.split(" | ").forEach(a => al.push(`<div class="banner alert" role="alert">${icon("alert")}<div>${esc(a)}</div></div>`));
+  document.getElementById("alerts").innerHTML = al.join("");
+}
+
+/* ---------- charts ---------- */
+function lineChart(id, labels, series, yTitle){
+  if (charts[id]) charts[id].destroy();
+  const box = document.getElementById(id).parentElement;
+  box.querySelector(".empty")?.remove();
+  const has = series.some(s => s.data.some(v => v!=null));
+  if (!has) box.insertAdjacentHTML("beforeend", `<div class="empty">${icon("chart")}<div>No data in this range</div></div>`);
+  charts[id] = new Chart(document.getElementById(id), {
+    type:"line",
+    data:{labels, datasets: series.map(s => ({label:s.label, data:s.data, borderColor:s.color, backgroundColor:s.fill || s.color,
+          fill:!!s.fill, spanGaps:false, tension:.25, borderDash:s.dash||[]}))},
+    options:{responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{legend:{display:series.length>1, position:"top", align:"end"}},
+      scales:{x:{ticks:{maxTicksLimit:7, maxRotation:0, callback:function(v){const l=this.getLabelForValue(v); return HOURS>24? l.slice(5,16) : l.slice(11,16);}}, grid:{display:false}},
+              y:{title:{display:!!yTitle, text:yTitle}, beginAtZero:false}}}
+  });
+}
+
+async function refreshHistory(){
+  let j; try { j = await getJSON("/api/history?hours=" + HOURS); } catch(e){ return; }
+  if (!j.success) return;
+  document.getElementById("res").textContent = j.resolution || "–";
+  const d = j.data, L = d.map(r => r.created_at), col = k => d.map(r => r[k]);
+  lineChart("c_aqi", L, [
+    {label:"Real-time", data:col("aqi_rt"), color:"#60A5FA", fill:"rgba(96,165,250,.10)"},
+    {label:"Hourly", data:col("aqi_hourly"), color:"#FB923C"},
+    {label:"CPCB-aligned", data:col("aqi_cpcb"), color:"#34D399", dash:[5,4]}], "AQI");
+  lineChart("c_pm", L, [{label:"Corrected", data:col("pm25"), color:"#60A5FA", fill:"rgba(96,165,250,.10)"},
+                        {label:"Raw", data:col("pm25_raw"), color:"#94A3B8", dash:[4,3]}], "µg/m³");
+  lineChart("c_co", L, [{label:"CO", data:col("co_mg"), color:"#FB923C", fill:"rgba(251,146,60,.10)"}], "mg/m³");
+  lineChart("c_t", L, [{label:"Temperature", data:col("temperature"), color:"#F472B6"}], "°C");
+  lineChart("c_rh", L, [{label:"Humidity", data:col("humidity"), color:"#38BDF8"}], "%");
+  lineChart("c_sup", L, [{label:"MQ-135 gas", data:col("mq135"), color:"#A78BFA"},
+                         {label:"GP2Y1010 dust", data:col("gpy10"), color:"#34D399", dash:[5,4]}], "ADC counts");
+  const rows = j.recent;
+  if (!rows.length) return;
+  let h = `<tr><th>Time (IST)</th><th class="num">PM2.5</th><th class="num">PM10</th><th class="num">CO mg/m³</th><th class="num">CO ppm</th>
+           <th class="num">MQ-135</th><th class="num">Dust</th><th class="num">T °C</th><th class="num">RH %</th><th class="num">P hPa</th>
+           <th class="num">AQI</th><th>Category</th><th>Dominant</th><th class="num">Fan %</th></tr>`;
+  for (const r of rows){
+    const cc = cat(r.aqi_rt);
+    h += `<tr><td class="mono">${esc(r.created_at)}</td><td class="num">${fmt(r.pm25)}</td><td class="num">${fmt(r.pm10)}</td><td class="num">${fmt(r.co_mg,2)}</td>
+      <td class="num">${fmt(r.co_ppm)}</td><td class="num">${fmt(r.mq135,0)}</td><td class="num">${fmt(r.gpy10,0)}</td><td class="num">${fmt(r.temperature)}</td>
+      <td class="num">${fmt(r.humidity)}</td><td class="num">${fmt(r.pressure,1)}</td><td class="num"><b>${r.aqi_rt ?? "–"}</b></td>
+      <td><span class="catdot"><i style="background:${cc[1]}"></i>${esc(r.category ?? "–")}</span></td><td>${esc(r.dominant ?? "–")}</td><td class="num">${r.fan_duty ?? "–"}</td></tr>`;
+  }
+  document.getElementById("t_recent").innerHTML = h;
+}
+
+async function refreshLifetime(){
+  let j; try { j = await getJSON("/api/aqi_history" + (LDAYS ? "?days=" + LDAYS : "")); } catch(e){ return; }
+  const byDay = {};
+  for (const r of j.data || []){ if (r.aqi_rt==null) continue; const k = r.created_at.slice(0,10);
+    (byDay[k] = byDay[k] || []).push(r.aqi_rt); }
+  const days = Object.keys(byDay).sort();
+  const mean = days.map(k => Math.round(byDay[k].reduce((a,b)=>a+b,0)/byDay[k].length));
+  const max = days.map(k => Math.round(Math.max(...byDay[k])));
+  const id = "c_life", box = document.getElementById(id).parentElement;
+  if (charts[id]) charts[id].destroy();
+  box.querySelector(".empty")?.remove();
+  if (!days.length) box.insertAdjacentHTML("beforeend", `<div class="empty">${icon("chart")}<div>No AQI history yet</div></div>`);
+  charts[id] = new Chart(document.getElementById(id), {type:"bar",
+    data:{labels:days, datasets:[
+      {label:"Daily mean", data:mean, backgroundColor:mean.map(v => cat(v)[1]), borderRadius:4, borderSkipped:"bottom"},
+      {type:"line", label:"Daily max", data:max, borderColor:"#F8FAFC", backgroundColor:"#F8FAFC", borderDash:[4,3], pointRadius:2}]},
+    options:{responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{position:"top", align:"end"}},
+      scales:{x:{grid:{display:false}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:10, callback:function(v){return this.getLabelForValue(v).slice(5);}}},
+              y:{beginAtZero:true, title:{display:true, text:"AQI"}}}}});
+}
+
+async function refreshPurification(){
+  let j; try { j = await getJSON("/api/purification"); } catch(e){ return; }
+  const [a,b] = j.theoretical;
+  document.getElementById("t_pur").innerHTML = `
+    <tr><th>Quantity</th><th class="num">${a.volume_m3} m³ enclosure</th><th class="num">${b.volume_m3} m³ room</th></tr>
+    <tr><td>Decay constant k</td><td class="num">${a.k_per_min} min⁻¹</td><td class="num">${b.k_per_h} h⁻¹</td></tr>
+    <tr><td>t₅₀</td><td class="num">${a.t50_min} min</td><td class="num">${(b.t50_min/60).toFixed(1)} h</td></tr>
+    <tr><td>t₉₀</td><td class="num">${a.t90_min} min</td><td class="num">${(b.t90_min/60).toFixed(1)} h</td></tr>
+    <tr><td>Reduction after 30 min</td><td class="num">${a.reduction_pct} %</td><td class="num">${b.reduction_pct} %</td></tr>
+    <tr><td>CADR (ηQ)</td><td class="num" colspan="2">${a.cadr_m3_h} m³/h</td></tr>`;
+  const r = j.last_run;
+  if (r) document.getElementById("lastrun").innerHTML = `
+    <table><tr><td>Run</td><td class="num">${esc(r.start)} → ${esc(r.end.slice(11))} (${r.minutes} min)</td></tr>
+    <tr><td>PM2.5 initial → final</td><td class="num">${r.c_initial} → ${r.c_final} µg/m³</td></tr>
+    <tr><td>Reduction R%</td><td class="num"><b>${r.reduction_pct ?? "–"} %</b></td></tr>
+    <tr><td>Decay constant k_on</td><td class="num">${r.k_on_per_min ?? "–"} min⁻¹</td></tr></table>
+    <div class="small muted" style="margin-top:8px">k is the slope of ln(C − C_bg) vs time (AHAM AC-1).</div>`;
+}
+
+function segment(sel, key, cb){
+  document.querySelectorAll(sel + " button").forEach(b => b.onclick = () => {
+    document.querySelectorAll(sel + " button").forEach(x => { x.classList.remove("active"); x.setAttribute("aria-pressed","false"); });
+    b.classList.add("active"); b.setAttribute("aria-pressed","true"); cb(+b.dataset[key]);
+  });
+}
+segment("#range", "h", v => { HOURS = v; refreshHistory(); });
+segment("#lrange", "d", v => { LDAYS = v; refreshLifetime(); });
+
+refreshLatest(); refreshHistory(); refreshPurification(); refreshLifetime();
+setInterval(refreshLatest, 5000);
+setInterval(refreshHistory, 30000);
+setInterval(refreshPurification, 60000);
+setInterval(refreshLifetime, 300000);
+</script>
+{% endblock %}

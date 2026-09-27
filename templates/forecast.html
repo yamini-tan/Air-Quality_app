@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}ML forecast{% endblock %}
+{% block style %}
+  .mcard{position:relative;border-top:4px solid var(--gray)}
+  .mcard .mv{font-size:32px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .mcard .best{position:absolute;top:14px;right:14px;background:var(--ok-soft);color:#86efac}
+  .mcard .kind{font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+  .mcard .err{font-size:12px;color:#fca5a5;margin-top:6px}
+  tr.bestrow td{background:var(--ok-soft);font-weight:700}
+  .g6{grid-template-columns:repeat(6,1fr)}
+  @media(max-width:1300px){.g6{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:700px){.g6{grid-template-columns:minmax(0,1fr)}}
+{% endblock %}
+{% block content %}
+<h1>12-hour AQI forecasting · five models</h1>
+<div class="sub">Target: hourly indicative CPCB AQI 12 h ahead (h = 48 steps of 15 min) from a 24-h input window (w = 96). Forecast recomputed every 60 s. Persistence is the baseline.</div>
+<div id="databanner" style="margin-top:14px"></div>
+
+<h2>Live forecast for <span id="target">–</span></h2>
+<div class="grid g6" id="mcards"></div>
+<div class="small muted" id="fcinfo" style="margin-top:8px"></div>
+
+<div class="card" style="margin-top:16px">
+  <h3>Hourly AQI: last 24 h and the next 12 h</h3>
+  <div class="small muted">Solid line: measured hourly indicative AQI. Dashed line: ARIMA 12-h path. Markers at +12 h: each model's forecast.</div>
+  <div class="chartbox" style="height:320px"><canvas id="c_fc"></canvas></div>
+</div>
+
+<h2>Test-set performance (Table 8)</h2>
+<div class="grid g2">
+  <div class="card">
+    <div class="tablewrap"><table id="t_metrics"></table></div>
+    <div class="small muted" style="margin-top:8px">MAE and RMSE in AQI units. MAE gain = (MAE<sub>pers</sub> − MAE) / MAE<sub>pers</sub>. Chronological 70/15/15 split, hyper-parameters tuned on validation, scored once on test.</div>
+  </div>
+  <div class="card"><h3>Forecast error by model</h3><div class="chartbox"><canvas id="c_err"></canvas></div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <h3>Test set: observed vs forecast AQI</h3>
+    <div class="seg" id="msel"></div>
+  </div>
+  <div class="chartbox" style="height:300px"><canvas id="c_test"></canvas></div>
+</div>
+
+<h2>Channel trend forecast (Table 6)</h2>
+<div class="card">
+  <div class="tablewrap"><table id="t_trend"></table></div>
+  <div class="small muted" style="margin-top:8px">ARIMA(1,0,1) on 5-min means of the last 24 h, 12 h ahead, per channel.</div>
+</div>
+
+<h2>Model configurations</h2>
+<div class="card"><div class="tablewrap"><table id="t_cfg"></table></div></div>
+{% endblock %}
+
+{% block script %}
+<script>
+const MODELS = ["Persistence","ARIMA","Random Forest","XGBoost","LSTM","GRU"];
+const MCOL = {"Persistence":"#94A3B8","ARIMA":"#60A5FA","Random Forest":"#FB923C","XGBoost":"#34D399","LSTM":"#FBBF24","GRU":"#A78BFA"};
+const KIND = {"Persistence":"Baseline","ARIMA":"Statistical","Random Forest":"Tree ensemble","XGBoost":"Tree ensemble","LSTM":"Recurrent NN","GRU":"Recurrent NN"};
+let charts = {}, TEST = null, SEL = null, BEST = null;
+
+function mk(id, cfg){ if (charts[id]) charts[id].destroy(); charts[id] = new Chart(document.getElementById(id), cfg); }
+
+async function refresh(){
+  const j = await getJSON("/api/forecast");
+  const tr = (j.training || {});
+  BEST = j.best_model;
+  const b = document.getElementById("databanner");
+  if (tr.data_kind === "synthetic")
+    b.innerHTML = `<div class="banner warn">${icon("alert")}<div><b>Models are trained on synthetic bootstrap data.</b> The live forecasts work, but these test scores are not measurements and must not be reported. After ≥ 7 days of logging run <code>AQMS_DB=/data/sensor_data.db ./venv/bin/python train.py --source db</code> on the server. (${tr.data_source})</div></div>`;
+  else if (tr.data_kind)
+    b.innerHTML = `<div class="banner info">${icon("info")}<div>Models trained ${tr.trained_at} on ${tr.data_source}.</div></div>`;
+  else b.innerHTML = `<div class="banner warn">${icon("alert")}<div>No trained models found. Run <code>python train.py</code> on the server.</div></div>`;
+
+  const fc = j.forecast;
+  const cards = MODELS.map(m => {
+    const r = fc && fc.models ? fc.models[m] : null;
+    const v = r && r.forecast!=null ? r.forecast : null;
+    const c = cat(v);
+    const err = r && r.error ? `<div class="err">${r.error}</div>` : (!r && j.load_errors && j.load_errors[m] ? `<div class="err">${j.load_errors[m]}</div>` : "");
+    return `<div class="card mcard" style="border-top-color:${MCOL[m]}">
+      ${m===BEST ? '<span class="pill best">★ best</span>' : ""}
+      <div class="kind">${KIND[m]}</div><h3>${m}</h3>
+      <div class="mv">${v==null ? "–" : Math.round(v)}</div>
+      <div class="small">${v==null ? (j.message||"") : `<span class="catdot"><i style="background:${c[1]}"></i>${c[0]}</span>`}</div>${err}</div>`;
+  }).join("");
+  document.getElementById("mcards").innerHTML = cards;
+  document.getElementById("target").textContent = fc && fc.target_time ? fc.target_time.slice(0,16) : "+12 h";
+  document.getElementById("fcinfo").textContent = fc ?
+    `Computed ${j.computed_at} IST from ${fc.history_steps}/96 fifteen-minute steps of history` + (fc.warming_up ? " — still warming up: the 24-h window is padded until a full day is logged, so forecasts are indicative only." : ".") : (j.message||"");
+
+  // live chart
+  const now = Date.now();
+  const hist = ((fc && fc.history) || []).map(r => ({x:(new Date(r.t.replace(" ","T")+"+05:30") - now)/3.6e6, y:r.aqi}));
+  const ds = [{label:"Measured (hourly indicative)", data:hist, borderColor:"#F8FAFC", backgroundColor:"#F8FAFC", tension:.25}];
+  if (fc && fc.models && fc.models.ARIMA && fc.models.ARIMA.path){
+    const x0 = hist.length ? hist[hist.length-1].x : 0;
+    ds.push({label:"ARIMA path", data:fc.models.ARIMA.path.map((y,i)=>({x:x0+(i+1)*0.25, y})), borderColor:MCOL.ARIMA, backgroundColor:MCOL.ARIMA, borderDash:[5,4], tension:.2});
+  }
+  if (fc && fc.models) for (const m of MODELS){
+    const r = fc.models[m];
+    if (r && r.forecast!=null) ds.push({label:m+" +12 h", data:[{x:12, y:r.forecast}], showLine:false, pointRadius:7, pointHoverRadius:9,
+      pointBorderColor:"#0F172A", pointBorderWidth:2, borderColor:MCOL[m], backgroundColor:MCOL[m]});
+  }
+  mk("c_fc", {type:"line", data:{datasets:ds}, options:{responsive:true, maintainAspectRatio:false, animation:false,
+    interaction:{mode:"nearest", intersect:false},
+    plugins:{legend:{position:"top", align:"end"}, tooltip:{callbacks:{title:it => { const x = it[0].parsed.x; return (x>=0?"+":"") + x.toFixed(1) + " h from now"; }}}},
+    scales:{x:{type:"linear", min:-24, max:13, title:{display:true, text:"hours from now"}, ticks:{stepSize:6}, grid:{display:false}},
+            y:{title:{display:true, text:"AQI"}, beginAtZero:true}}}});
+
+  // metrics table + chart
+  const res = tr.results || [];
+  let t = `<tr><th>Model</th><th class="num">MAE</th><th class="num">RMSE</th><th class="num">R²</th><th class="num">MAE gain</th><th class="num">Train time</th></tr>`;
+  for (const r of res) t += `<tr class="${r.model===BEST?'bestrow':''}"><td><span style="color:${MCOL[r.model]}">■</span> ${r.model}</td><td class="num">${fmt(r.mae,1)}</td><td class="num">${fmt(r.rmse,1)}</td>
+      <td class="num">${fmt(r.r2,2)}</td><td class="num">${r.mae_gain_pct==null?"–":fmt(r.mae_gain_pct,1)+" %"}</td><td class="num">${r.train_time_s==null?"–":fmt(r.train_time_s,1)+" s"}</td></tr>`;
+  document.getElementById("t_metrics").innerHTML = t;
+  let c = `<tr><th>Model</th><th>Selected hyper-parameters</th></tr>`;
+  for (const r of res) c += `<tr><td>${r.model}</td><td>${r.config}</td></tr>`;
+  c += `<tr><td colspan="2" class="muted">Samples: ${tr.samples ? `train ${tr.samples.train}, validation ${tr.samples.validation}, test ${tr.samples.test}` : "–"} · features: ${(tr.features||[]).join(", ")}</td></tr>`;
+  document.getElementById("t_cfg").innerHTML = c;
+  if (res.length) mk("c_err", {type:"bar", data:{labels:res.map(r=>r.model), datasets:[
+      {label:"MAE", data:res.map(r=>r.mae), backgroundColor:"#60A5FA", borderRadius:4, borderSkipped:"bottom"},
+      {label:"RMSE", data:res.map(r=>r.rmse), backgroundColor:"#94a3b8", borderRadius:4, borderSkipped:"bottom"}]},
+    options:{responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{position:"top", align:"end"}},
+      scales:{x:{grid:{display:false}}, y:{title:{display:true, text:"AQI units"}, beginAtZero:true}}}});
+
+  // trend table
+  const trd = j.trend || {};
+  const last = (await getJSON("/api/latest")).reading || {};
+  const rows = [["PM2.5 corrected (µg/m³)","pm25"],["CO (mg/m³)","co_mg"],["GP2Y1010 dust (ADC counts)","gpy10"],["MQ-135 gas index (ADC counts)","mq135"],
+                ["Temperature (°C)","temperature"],["Humidity (%)","humidity"],["Pressure (hPa)","pressure"]];
+  let tt = `<tr><th>Channel</th><th class="num">Measured</th><th class="num">ARIMA 12-h forecast</th></tr>`;
+  for (const [n,k] of rows) tt += `<tr><td>${n}</td><td class="num">${fmt(last[k],2)}</td><td class="num">${fmt(trd[k],2)}</td></tr>`;
+  document.getElementById("t_trend").innerHTML = tt;
+}
+
+async function loadTest(){
+  const j = await getJSON("/api/test_predictions");
+  if (!j.success) return;
+  TEST = j.data;
+  const avail = MODELS.filter(m => TEST[m]);
+  SEL = SEL || (BEST && avail.includes(BEST) ? BEST : avail[0]);
+  document.getElementById("msel").innerHTML = avail.map(m => `<button class="${m===SEL?'active':''}" data-m="${m}">${m}</button>`).join("");
+  document.querySelectorAll("#msel button").forEach(b => b.onclick = () => { SEL = b.dataset.m; loadTest(); });
+  mk("c_test", {type:"line", data:{labels:TEST.target_time, datasets:[
+      {label:"Observed", data:TEST.actual, borderColor:"#F8FAFC", backgroundColor:"#F8FAFC"},
+      {label:SEL + " (12 h ahead)", data:TEST[SEL], borderColor:MCOL[SEL], backgroundColor:MCOL[SEL]}]},
+    options:{responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{position:"top", align:"end"}},
+      scales:{x:{ticks:{maxTicksLimit:8, maxRotation:0, callback:function(v){return this.getLabelForValue(v).slice(5,16);}}, grid:{display:false}},
+              y:{title:{display:true, text:"AQI"}, beginAtZero:true}}}});
+}
+
+refresh().then(loadTest);
+setInterval(refresh, 60000);
+</script>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}System{% endblock %}
+{% block style %}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:center}
+  .fb{padding:12px 14px;border-radius:10px;background:var(--brand-soft);border:1px solid rgba(56,189,248,.35);color:#bae6fd;font-size:13px;font-weight:600;text-align:center;min-width:120px}
+  .fa{color:var(--muted);font-weight:700}
+{% endblock %}
+{% block content %}
+<h1>Multi-pollutant indoor AQMS</h1>
+<div class="sub">CPCB-based AQI estimation, 12-hour forecasting and closed-loop HEPA purification for a single room.</div>
+
+<h2>Architecture</h2>
+<div class="card"><div class="flow">
+  <div class="fb">6 sensors</div><div class="fa">→</div><div class="fb">ESP32 DevKit V1</div><div class="fa">→</div>
+  <div class="fb">Wi-Fi HTTP POST<br><span class="small">/api/ingest</span></div><div class="fa">→</div>
+  <div class="fb">Flask on AWS EC2<br><span class="small">filter · correct · AQI</span></div><div class="fa">→</div>
+  <div class="fb">5 forecasting models<br><span class="small">12 h ahead</span></div><div class="fa">→</div>
+  <div class="fb">Staged controller<br><span class="small">Table 5</span></div><div class="fa">→</div>
+  <div class="fb">Fan command → L298N<br><span class="small">G4 + H13 filters</span></div>
+</div></div>
+
+<h2>Sensors and roles (Table 2)</h2>
+<div class="card"><div class="tablewrap"><table>
+<tr><th>Sensor</th><th>Quantity</th><th>Role</th><th>Interface</th><th>ESP32 pins</th></tr>
+<tr><td>PMS5003</td><td>PM2.5, PM10 (µg/m³)</td><td><span class="tag pol">CPCB pollutant</span></td><td>UART2, 9600 baud</td><td>GPIO16 (RX2), GPIO17 (TX2)</td></tr>
+<tr><td>MQ-7</td><td>Carbon monoxide (ppm → mg/m³)</td><td><span class="tag pol">CPCB pollutant</span></td><td>Analog, 10 kΩ/20 kΩ divider</td><td>GPIO35</td></tr>
+<tr><td>MQ-135</td><td>Gas index (a.u.)</td><td><span class="tag sup">Supplementary</span></td><td>Analog, 10 kΩ/20 kΩ divider</td><td>GPIO34</td></tr>
+<tr><td>GP2Y1010AU0F</td><td>Dust density (a.u.)</td><td><span class="tag sup">Supplementary</span></td><td>Analog via divider; LED 150 Ω + 220 µF</td><td>GPIO36; LED GPIO32</td></tr>
+<tr><td>DHT22</td><td>Temperature (°C), relative humidity (%)</td><td><span class="tag ctx">Context / correction</span></td><td>1-wire, 10 kΩ pull-up</td><td>GPIO4</td></tr>
+<tr><td>BMP280</td><td>Pressure (hPa)</td><td><span class="tag ctx">Context / CO conversion</span></td><td>I²C, 0x76</td><td>GPIO21 (SDA), GPIO22 (SCL)</td></tr>
+<tr><td>L298N</td><td>Fan PWM</td><td>Actuator</td><td>PWM on ENA; IN1, IN2</td><td>GPIO26; GPIO27, GPIO14</td></tr>
+</table></div></div>
+
+<h2>Processing</h2>
+<div class="grid g3">
+  <div class="card"><h3>Cleaning</h3><p class="sub">Out-of-range readings and duplicate frames dropped, gaps marked (not interpolated), 5-sample moving median removes spikes.</p></div>
+  <div class="card"><h3>Correction</h3><p class="sub">PM2.5: C = 0.524·C<sub>raw</sub> − 0.0862·RH + 5.75. CO: ppm → mg/m³ with measured T and P (1 ppm ≈ 1.02 mg/m³ in Bengaluru).</p></div>
+  <div class="card"><h3>AQI</h3><p class="sub">CPCB sub-index interpolation; AQI = max sub-index. Real-time (1-min), hourly indicative (1-h) and CPCB-aligned (24-h PM2.5, 8-h CO).</p></div>
+  <div class="card"><h3>Forecasting</h3><p class="sub">ARIMA, Random Forest, XGBoost, LSTM and GRU against a persistence baseline, 12 h ahead from a 24-h window.</p></div>
+  <div class="card"><h3>Control</h3><p class="sub">Stage 0 / 1 / 2 at 0 / 50 / 100 % duty from current and forecast AQI, with a 10-min hysteresis before standby.</p></div>
+  <div class="card"><h3>Purification</h3><p class="sub">Reduction %, decay constant k, t₅₀, t₉₀ and CADR<sub>eff</sub> = V(k<sub>on</sub> − k<sub>off</sub>).</p></div>
+</div>
+{% endblock %}

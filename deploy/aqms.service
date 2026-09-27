@@ -1,0 +1,25 @@
+[Unit]
+Description=AQMS Flask dashboard + ESP32 ingest API
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/air-quality-aws
+Environment=AQMS_API_KEY=aqms-esp32-key
+# 1 = also pull readings the OLD firmware pushes to the aislyntech PHP API (backward compatibility)
+Environment=LEGACY_POLL=1
+# database on the separate EBS data volume mounted at /data (survives instance replacement)
+Environment=AQMS_DB=/data/sensor_data.db
+# raw readings kept 10 days (>= 7 needed for retraining); AQI kept forever in aqi_history
+Environment=RETENTION_DAYS=10
+Environment=ROOM_VOLUME_M3=30
+Environment=TF_CPP_MIN_LOG_LEVEL=3
+# server-only overrides (e.g. a private AQMS_API_KEY) - not in git, optional
+EnvironmentFile=-/etc/aqms.env
+# one worker (fan-controller state lives in memory), several threads
+ExecStart=/home/ubuntu/air-quality-aws/venv/bin/gunicorn -w 1 --threads 8 -b 0.0.0.0:5000 --timeout 120 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0F172A">
+<title>{% block title %}AQMS{% endblock %} · AirMonitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  /* Design tokens: "dark tech + status green" (ui-ux-pro-max), dense dashboard spacing */
+  :root{
+    --bg:#0F172A; --bg2:#111a2e; --card:#1B2336; --card2:#212b40; --muted-bg:#272F42;
+    --ink:#F8FAFC; --ink2:#CBD5E1; --muted:#94A3B8; --line:rgba(148,163,184,.16); --line2:rgba(148,163,184,.28);
+    --brand:#38BDF8; --brand-soft:rgba(56,189,248,.12);
+    --ok:#22C55E; --ok-soft:rgba(34,197,94,.14); --warn:#F59E0B; --warn-soft:rgba(245,158,11,.14);
+    --bad:#EF4444; --bad-soft:rgba(239,68,68,.14);
+    --s1:#60A5FA; --s2:#FB923C; --s3:#34D399; --s4:#FBBF24; --s5:#F472B6; --s6:#A78BFA; --gray:#94A3B8;
+    --radius:14px; --sp1:8px; --sp2:12px; --sp3:16px; --sp4:24px; --sp5:32px;
+    --mono:"Fira Code",ui-monospace,SFMono-Regular,Consolas,monospace;
+    --sans:"Fira Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+    color-scheme:dark;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{overflow-x:hidden;background:radial-gradient(1200px 600px at 10% -10%,rgba(56,189,248,.08),transparent 60%),
+                  radial-gradient(900px 500px at 100% 0%,rgba(34,197,94,.06),transparent 60%),var(--bg);
+       background-attachment:fixed;color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;min-height:100vh}
+  a{color:var(--brand)} a:hover{color:#7dd3fc}
+  :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
+  .ico{width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .num-font,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* navbar */
+  .navbar{min-height:60px;background:rgba(15,23,42,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+          border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:var(--sp2);
+          padding:8px clamp(14px,3vw,40px);position:sticky;top:0;z-index:100;flex-wrap:wrap}
+  .logo{color:var(--ink);font-size:20px;font-weight:700;letter-spacing:-.3px;display:flex;align-items:center;gap:8px;text-decoration:none}
+  .logo .ico{width:24px;height:24px;color:var(--ok)} .logo span{color:var(--brand)}
+  .nav{display:flex;gap:4px;flex-wrap:wrap}
+  .nav a{color:var(--ink2);text-decoration:none;font-size:14px;font-weight:500;padding:9px 14px;border-radius:10px;min-height:40px;
+         display:inline-flex;align-items:center;gap:6px;transition:background .18s,color .18s}
+  .nav a:hover{background:rgba(148,163,184,.12);color:var(--ink)}
+  .nav a.active{background:var(--brand-soft);color:var(--brand)}
+  .nav-right{display:flex;align-items:center;gap:var(--sp2);flex-wrap:wrap;min-width:0}
+
+  /* device status chip (every page) */
+  .dchip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;
+         border:1px solid var(--line2);background:var(--muted-bg);color:var(--ink2);white-space:nowrap;text-decoration:none}
+  .dchip .led{width:9px;height:9px;border-radius:50%;background:var(--muted);position:relative}
+  .dchip.online{color:#bbf7d0;border-color:rgba(34,197,94,.45);background:var(--ok-soft)} .dchip.online .led{background:var(--ok)}
+  .dchip.online .led::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--ok);animation:ping 1.8s ease-out infinite}
+  .dchip.delayed{color:#fde68a;border-color:rgba(245,158,11,.45);background:var(--warn-soft)} .dchip.delayed .led{background:var(--warn)}
+  .dchip.offline,.dchip.never,.dchip.unreachable{color:#fecaca;border-color:rgba(239,68,68,.45);background:var(--bad-soft)}
+  .dchip.offline .led,.dchip.never .led,.dchip.unreachable .led{background:var(--bad)}
+  @keyframes ping{0%{transform:scale(.6);opacity:.9}100%{transform:scale(1.6);opacity:0}}
+
+  .wrap{width:100%;max-width:1440px;margin:0 auto;padding:var(--sp4) clamp(14px,3vw,40px) 48px}
+  h1{font-size:clamp(22px,2.4vw,28px);font-weight:700;letter-spacing:-.4px;margin-bottom:4px}
+  h2{font-size:18px;font-weight:600;margin:var(--sp5) 0 var(--sp2);display:flex;align-items:center;gap:8px}
+  h2 .ico{color:var(--brand)}
+  h3{font-size:14px;font-weight:600;margin-bottom:6px;color:var(--ink)}
+  .sub{color:var(--muted);font-size:13.5px;line-height:1.6}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.025),transparent 40%),var(--card);border:1px solid var(--line);
+        border-radius:var(--radius);padding:var(--sp3) 18px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 8px 24px rgba(0,0,0,.25)}
+  .grid{display:grid;gap:var(--sp2)}
+  .g2{grid-template-columns:repeat(2,minmax(0,1fr))} .g3{grid-template-columns:repeat(3,minmax(0,1fr))} .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.on{background:var(--ok-soft);color:#86efac}.pill.off{background:var(--bad-soft);color:#fca5a5}.pill.warn{background:var(--warn-soft);color:#fcd34d}
+  .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+  .tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(167,139,250,.14);color:#c4b5fd}
+  .tag.pol{background:var(--bad-soft);color:#fca5a5}.tag.sup{background:var(--brand-soft);color:#7dd3fc}.tag.ctx{background:rgba(148,163,184,.14);color:var(--ink2)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px;background:rgba(148,163,184,.05)}
+  tbody tr:hover td,tr:hover td{background:rgba(148,163,184,.04)}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .tablewrap{overflow-x:auto}
+  code{font-family:var(--mono);font-size:12.5px;background:rgba(148,163,184,.14);padding:1px 6px;border-radius:6px}
+  .btn{border:0;background:var(--brand);color:#0F172A;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px}
+  .btn.ghost{background:var(--brand-soft);color:var(--brand)}
+  .seg{display:inline-flex;background:var(--muted-bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+  .seg button{border:0;background:transparent;padding:7px 12px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--muted);
+              border-radius:8px;min-height:34px;font-family:var(--sans);transition:background .15s,color .15s}
+  .seg button:hover{color:var(--ink)}
+  .seg button.active{background:var(--card2);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+  .banner{padding:12px 16px;border-radius:12px;font-size:13.5px;margin-bottom:var(--sp2);line-height:1.55;display:flex;gap:10px;align-items:flex-start}
+  .banner .ico{margin-top:2px}
+  .banner.alert{background:var(--bad-soft);color:#fecaca;border:1px solid rgba(239,68,68,.35)}
+  .banner.warn{background:var(--warn-soft);color:#fde68a;border:1px solid rgba(245,158,11,.35)}
+  .banner.info{background:var(--brand-soft);color:#bae6fd;border:1px solid rgba(56,189,248,.3)}
+  .banner code{background:rgba(0,0,0,.25)}
+  .chartbox{position:relative;height:250px}
+  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+         color:var(--muted);font-size:13px;text-align:center;pointer-events:none}
+  .empty .ico{width:26px;height:26px;opacity:.7}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  .catdot{display:inline-flex;align-items:center;gap:6px}
+  .catdot i{width:9px;height:9px;border-radius:3px;display:inline-block}
+  .footer{text-align:center;color:var(--muted);font-size:12px;padding:20px 16px 28px}
+  @media(max-width:1100px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:700px){.g2,.g3,.g4{grid-template-columns:minmax(0,1fr)}.nav a{padding:8px 10px;font-size:13px}.logo{font-size:18px}.nav-right{width:100%;justify-content:space-between}.dchip{white-space:normal}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+  {% block style %}{% endblock %}
+</style>
+</head>
+<body>
+<!-- SVG icon sprite (Lucide-style strokes; icons are decorative, text carries meaning) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-wind" viewBox="0 0 24 24"><path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 9V3"/><path d="M14 9V3"/><path d="M10 9 4.5 19a1.5 1.5 0 0 0 1.3 2.2h12.4a1.5 1.5 0 0 0 1.3-2.2L14 9"/><path d="M7 15h10"/></symbol>
+  <symbol id="i-dust" viewBox="0 0 24 24"><circle cx="6" cy="7" r="1.5"/><circle cx="13" cy="5" r="1"/><circle cx="18" cy="9" r="1.5"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="15" r="1.5"/><circle cx="6" cy="18" r="1"/><circle cx="19" cy="19" r="1"/></symbol>
+  <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></symbol>
+  <symbol id="i-droplet" viewBox="0 0 24 24"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-fan" viewBox="0 0 24 24"><path d="M10.83 7.3c-.67-.28-1.28-.83-1.62-1.62C8.47 3.97 9.5 2 11.35 2c2.7 0 4.15 2.7 3.44 5.14"/><path d="M16.7 10.83c.28-.67.83-1.28 1.62-1.62 1.71-.74 3.68.29 3.68 2.14 0 2.7-2.7 4.15-5.14 3.44"/><path d="M13.17 16.7c.67.28 1.28.83 1.62 1.62.74 1.71-.29 3.68-2.14 3.68-2.7 0-4.15-2.7-3.44-5.14"/><path d="M7.3 13.17c-.28.67-.83 1.28-1.62 1.62C3.97 15.53 2 14.5 2 12.65c0-2.7 2.7-4.15 5.14-3.44"/><circle cx="12" cy="12" r="2"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.86a10 10 0 0 1 14 0"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 4.18-2.65"/><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"/><path d="M16.85 11.25a10 10 0 0 1 2.22 1.68"/><path d="M5 13a10 10 0 0 1 5.24-2.76"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+  <symbol id="i-table" viewBox="0 0 24 24"><path d="M12 3v18"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></symbol>
+</svg>
+<nav class="navbar" aria-label="Main">
+  <a class="logo" href="/"><svg class="ico" aria-hidden="true"><use href="#i-leaf"/></svg>Air<span>Monitor</span></a>
+  <div class="nav-right">
+    <div class="nav">
+      <a href="/" class="{{ 'active' if request.path == '/' }}" {{ 'aria-current=page' if request.path == '/' }}><svg class="ico" aria-hidden="true"><use href="#i-activity"/></svg>Live</a>
+      <a href="/forecast" class="{{ 'active' if request.path == '/forecast' }}" {{ 'aria-current=page' if request.path == '/forecast' }}><svg class="ico" aria-hidden="true"><use href="#i-sparkle"/></svg>Forecast</a>
+      <a href="/about" class="{{ 'active' if request.path == '/about' }}" {{ 'aria-current=page' if request.path == '/about' }}><svg class="ico" aria-hidden="true"><use href="#i-cpu"/></svg>System</a>
+    </div>
+    <a href="/" class="dchip never" id="dchip" role="status" aria-atomic="true" title="Sensor node connection">
+      <span class="led" aria-hidden="true"></span><span id="dchip-text">Checking device…</span>
+    </a>
+  </div>
+</nav>
+<main class="wrap">{% block content %}{% endblock %}</main>
+<div class="footer">AQMS · CPCB-method indoor AQI · 12-hour forecasting · closed-loop HEPA purification</div>
+<script>
+const CAT = [[50,"Good","#22C55E"],[100,"Satisfactory","#84CC16"],[200,"Moderately Polluted","#EAB308"],
+             [300,"Poor","#F97316"],[400,"Very Poor","#EF4444"],[500,"Severe","#B91C1C"]];
+function cat(a){ if(a===null||a===undefined||isNaN(a)) return ["No data","#94A3B8"];
+  for(const c of CAT){ if(a<=c[0]) return [c[1],c[2]]; } return ["Severe","#B91C1C"]; }
+function fmt(v,d=1){ return (v===null||v===undefined||isNaN(v)) ? "–" : Number(v).toFixed(d); }
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function icon(id, cls="ico"){ return `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"/></svg>`; }
+async function getJSON(u){ const r = await fetch(u + (u.includes("?")?"&":"?") + "_=" + Date.now(), {cache:"no-store"});
+  if (!r.ok && r.status >= 500) throw new Error("HTTP " + r.status); return r.json(); }
+function ago(s){ if (s==null) return "never"; if (s<5) return "just now"; if (s<60) return s+" s ago";
+  if (s<3600) return Math.floor(s/60)+" min ago"; if (s<86400) return Math.floor(s/3600)+" h "+Math.floor(s%3600/60)+" min ago";
+  const d=Math.floor(s/86400); return d+" day"+(d>1?"s":"")+" ago"; }
+
+/* ---- device status, shared by every page ----
+   state: online (<30 s) | delayed (30 s-5 min) | offline | never | unreachable (browser cannot reach the server) */
+const DEVICE = {state:"never", base:null, fetchedAt:0, listeners:[]};
+const DSTATE = {online:"Device online", delayed:"Signal delayed", offline:"Device offline", never:"No data yet", unreachable:"Server unreachable"};
+function deviceAgo(){ return DEVICE.base==null ? null : DEVICE.base + Math.floor((Date.now()-DEVICE.fetchedAt)/1000); }
+function deviceState(){ // re-derive locally between polls so the chip degrades on its own
+  if (DEVICE.state==="unreachable" || DEVICE.state==="never") return DEVICE.state;
+  const s = deviceAgo(); return s < (DEVICE.info?.offline_after_s ?? 30) ? "online" : (s < 300 ? "delayed" : "offline"); }
+function renderChip(){
+  const st = deviceState(), chip = document.getElementById("dchip"), s = deviceAgo();
+  chip.className = "dchip " + st;
+  const t = st==="online" ? `${DSTATE[st]} · ${ago(s)}` : st==="never" || st==="unreachable" ? DSTATE[st] : `${DSTATE[st]} · ${ago(s)}`;
+  const el = document.getElementById("dchip-text"); if (el.textContent !== t) el.textContent = t;
+  DEVICE.listeners.forEach(f => f(st, s, DEVICE.info));
+}
+function onDevice(f){ DEVICE.listeners.push(f); }
+function setDevice(info){ DEVICE.info = info; DEVICE.state = info.state; DEVICE.base = info.seconds_ago; DEVICE.fetchedAt = Date.now(); renderChip(); }
+async function pollDevice(){
+  try { setDevice(await getJSON("/api/status")); }
+  catch(e){ DEVICE.state = "unreachable"; renderChip(); }
+}
+pollDevice(); setInterval(pollDevice, 5000); setInterval(renderChip, 1000);
+
+Chart.defaults.font.family = '"Fira Sans",system-ui,sans-serif';
+Chart.defaults.font.size = 11;
+Chart.defaults.color = "#94A3B8";
+Chart.defaults.borderColor = "rgba(148,163,184,.12)";
+Chart.defaults.plugins.legend.labels.boxWidth = 10;
+Chart.defaults.plugins.legend.labels.boxHeight = 10;
+Chart.defaults.plugins.tooltip.backgroundColor = "#0B1222";
+Chart.defaults.plugins.tooltip.borderColor = "rgba(148,163,184,.3)";
+Chart.defaults.plugins.tooltip.borderWidth = 1;
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.titleFont = {family:'"Fira Code",monospace', size:11};
+Chart.defaults.elements.line.borderWidth = 2;
+Chart.defaults.elements.point.radius = 0;
+Chart.defaults.elements.point.hoverRadius = 5;
+Chart.defaults.interaction = {mode:"index", intersect:false};
+</script>
+{% block script %}{% endblock %}
+</body>
+</html>

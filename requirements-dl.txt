@@ -1,0 +1,2 @@
+# LSTM + GRU models (needs >= 2 GB RAM, e.g. t3.small / t3.medium)
+tensorflow-cpu>=2.16   # 2.21.0
