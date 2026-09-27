@@ -1,7 +1,8 @@
 name: Test & deploy to EC2
 
-# PR opened/updated  -> tests only (shows a check on the PR)
-# PR merged to main  -> tests, then automatic deploy to the EC2 (no manual step)
+# PR opened/updated  -> "Core functionality check" (shows as a check on the PR)
+# PR merged to main  -> same check, then automatic deploy to the EC2 + live check,
+#                       with automatic rollback to the previous version if the live check fails
 on:
   pull_request:
     branches: [main]
@@ -15,6 +16,7 @@ concurrency:
 
 jobs:
   test:
+    name: Core functionality check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -25,37 +27,30 @@ jobs:
           cache: pip
       - name: Install requirements
         run: pip install -r requirements.txt
-      - name: Compile
+      - name: Python files compile
         run: python -m py_compile app.py aqi_engine.py forecasting.py train.py retention.py synthetic_data.py tools/*.py
       - name: Fake data + retention (new hardware and current firmware formats)
         run: |
           python tools/seed_fake_data.py --db /tmp/seed_new.db --days 12 --cleanup
           python tools/seed_fake_data.py --db /tmp/seed_old.db --days 12 --legacy --cleanup
-          python retention.py --db /tmp/seed_new.db --dry-run
-      - name: Smoke test (start app, send fake ESP32 frames, hit every endpoint)
+      - name: Pages load and APIs return data (fake ESP32)
         env:
           AQMS_DB: /tmp/seed_new.db
           LEGACY_POLL: "0"
         run: |
           python app.py > /tmp/app.log 2>&1 &
-          for i in $(seq 1 30); do curl -sf localhost:5000/api/health >/dev/null && break; sleep 1; done
-          python tools/simulate_esp32.py --count 3 --interval 0.2
-          # current firmware format (aislyntech field names)
-          curl -sf "localhost:5000/api/ingest?key=aqms-esp32-key&gpy10=450&mq135=2300&temperature=28&humidity=60&bmp280=912&aqi=45&fan=OFF" >/dev/null
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:5000/api/ingest -d '{}')" = 401
-          curl -s localhost:5000/api/status | grep -q '"state":"online"'
-          for u in / /forecast /about /api/latest /api/status "/api/history?hours=1" "/api/history?hours=168" /api/forecast \
-                   /api/purification /api/health /api/sensor_data /api/predict_future /api/aqi_history /api/test_predictions; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "localhost:5000$u"); echo "$u $code"
-            [ "$code" = 200 ] || { cat /tmp/app.log; exit 1; }
-          done
+          python tools/smoke_check.py --url http://127.0.0.1:5000 --ingest || { echo "---- app log ----"; tail -80 /tmp/app.log; exit 1; }
 
   deploy:
+    name: Deploy to EC2
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
+    env:
+      TARGET: ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}
+      APP: /home/ubuntu/air-quality-aws
     steps:
       - uses: actions/checkout@v5
       - name: Set up SSH key
@@ -64,14 +59,22 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2.pem
           chmod 600 ~/.ssh/ec2.pem
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+      - name: Snapshot the running version (for rollback)
+        run: ssh -i ~/.ssh/ec2.pem "$TARGET" "rsync -a --delete --exclude venv/ --exclude trained_models/ --exclude '*.db*' $APP/ /home/ubuntu/aqms_prev/"
       - name: Upload code (keeps database, venv and server-trained models)
         run: |
           rsync -az --delete -e "ssh -i ~/.ssh/ec2.pem" \
             --exclude '.git/' --exclude '.github/' --exclude 'venv/' \
             --exclude '*.db' --exclude '*.db-journal' --exclude '*.db-wal' --exclude '*.db-shm' \
             --exclude 'trained_models/' --exclude '.requirements*.sha' --exclude '__pycache__/' \
-            ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/ubuntu/air-quality-aws/"
+            ./ "$TARGET:$APP/"
       - name: Install, restart, health check
-        run: ssh -i ~/.ssh/ec2.pem "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" "bash /home/ubuntu/air-quality-aws/deploy/ci_deploy.sh"
-      - name: Public check
-        run: curl -sf --retry 10 --retry-delay 3 --retry-all-errors "http://${{ secrets.EC2_HOST }}:5000/api/health"
+        run: ssh -i ~/.ssh/ec2.pem "$TARGET" "bash $APP/deploy/ci_deploy.sh"
+      - name: Live core functionality check (read-only)
+        run: python3 tools/smoke_check.py --url "http://${{ secrets.EC2_HOST }}:5000" --wait 90
+      - name: Roll back to the previous version
+        if: failure()
+        run: |
+          echo "Deploy or live check failed - restoring the previous version"
+          ssh -i ~/.ssh/ec2.pem "$TARGET" "test -d /home/ubuntu/aqms_prev && rsync -a --delete --exclude venv/ --exclude trained_models/ --exclude '*.db*' /home/ubuntu/aqms_prev/ $APP/ && bash $APP/deploy/ci_deploy.sh"
+          python3 tools/smoke_check.py --url "http://${{ secrets.EC2_HOST }}:5000" --wait 90

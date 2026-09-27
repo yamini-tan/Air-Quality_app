@@ -145,6 +145,19 @@ The ML forecast page then shows Table 8 computed from your own data.
 - Old firmware (GP2Y1010/MQ-135 only, via the aislyntech PHP API): with no PM2.5/CO, the device's own
   `aqi` is used as the AQI (`dominant = "Dust (device AQI)"`), so the dashboard, forecasting and training still work.
 
+## Making changes (PR -> automatic deploy)
+
+1. Create a branch, commit, open a pull request to `main`. The PR description template asks for a summary,
+   the changes and a short checklist.
+2. GitHub Actions runs the **Core functionality check** (`tools/smoke_check.py --ingest`): starts the app with fake
+   data, sends fake ESP32 frames, and verifies every page loads (no 404/500/blank page) and every API returns data.
+   It does not test design details, so UI changes don't break it.
+3. Merge the PR. The workflow deploys to the EC2, runs the same check read-only against the live site, and
+   **rolls back automatically** to the previous version if that fails. Nothing to do by hand.
+
+Run the check yourself: `python tools/smoke_check.py --url http://127.0.0.1:5000 --ingest` (local test app only;
+without `--ingest` it is read-only and safe against the live server).
+
 ## Troubleshooting
 
 | Symptom (ESP32 Serial Monitor) | Fix |
