@@ -63,12 +63,12 @@ CPCB_BREAKPOINTS = {
 }
 
 CATEGORIES = [  # (upper AQI, name, colour)
-    (50, "Good", "#16a34a"),
-    (100, "Satisfactory", "#84cc16"),
-    (200, "Moderately Polluted", "#eab308"),
-    (300, "Poor", "#f97316"),
-    (400, "Very Poor", "#dc2626"),
-    (500, "Severe", "#7f1d1d"),
+    (50, "Good", "#16A34A"),
+    (100, "Satisfactory", "#65A30D"),
+    (200, "Moderately Polluted", "#CA8A04"),
+    (300, "Poor", "#EA580C"),
+    (400, "Very Poor", "#DC2626"),
+    (500, "Severe", "#991B1B"),
 ]
 
 
@@ -117,7 +117,7 @@ def category(aqi: Optional[float]):
     for upper, name, color in CATEGORIES:
         if aqi <= upper:
             return name, color
-    return "Severe", "#7f1d1d"
+    return "Severe", "#991B1B"
 
 
 # =====================================================================
