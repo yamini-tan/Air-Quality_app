@@ -29,7 +29,7 @@
   .aqi-main{display:flex;gap:22px;align-items:center;min-width:0}
   .aqi-hero>*{min-width:0}
   .gauge{--p:0;--c:#94A3B8;width:156px;height:156px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
-         background:conic-gradient(var(--c) calc(var(--p)*1%),rgba(148,163,184,.14) 0)}
+         background:conic-gradient(var(--c) calc(var(--p)*1%),#E2E8F0 0)}
   .gauge>div{width:124px;height:124px;border-radius:50%;background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center}
   .gauge b{font-family:var(--mono);font-size:42px;line-height:1;font-weight:600}
   .gauge span{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.6px}
@@ -42,7 +42,7 @@
   .mini .val{font-size:30px;font-weight:600;font-family:var(--mono);line-height:1.2;margin-top:4px}
   .klabel{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
   .klabel .ico{width:15px;height:15px}
-  .bar{height:8px;background:rgba(148,163,184,.14);border-radius:999px;overflow:hidden;margin:10px 0 8px}
+  .bar{height:8px;background:#E2E8F0;border-radius:999px;overflow:hidden;margin:10px 0 8px}
   .bar div{height:100%;background:var(--ok);border-radius:999px;transition:width .4s ease-out}
 
   .sensor{position:relative;display:flex;flex-direction:column}
@@ -183,12 +183,12 @@
 <div class="grid g2">
   <div class="card"><h3>CPCB breakpoints</h3><div class="tablewrap">
     <table><tr><th>AQI</th><th>Category</th><th>PM2.5 24-h (µg/m³)</th><th>CO 8-h (mg/m³)</th></tr>
-      <tr><td class="mono">0–50</td><td><span class="catdot"><i style="background:#22C55E"></i>Good</span></td><td class="mono">0–30</td><td class="mono">0–1.0</td></tr>
-      <tr><td class="mono">51–100</td><td><span class="catdot"><i style="background:#84CC16"></i>Satisfactory</span></td><td class="mono">31–60</td><td class="mono">1.1–2.0</td></tr>
-      <tr><td class="mono">101–200</td><td><span class="catdot"><i style="background:#EAB308"></i>Moderately Polluted</span></td><td class="mono">61–90</td><td class="mono">2.1–10</td></tr>
-      <tr><td class="mono">201–300</td><td><span class="catdot"><i style="background:#F97316"></i>Poor</span></td><td class="mono">91–120</td><td class="mono">10.1–17</td></tr>
-      <tr><td class="mono">301–400</td><td><span class="catdot"><i style="background:#EF4444"></i>Very Poor</span></td><td class="mono">121–250</td><td class="mono">17.1–34</td></tr>
-      <tr><td class="mono">401–500</td><td><span class="catdot"><i style="background:#B91C1C"></i>Severe</span></td><td class="mono">&gt;250</td><td class="mono">&gt;34</td></tr></table></div></div>
+      <tr><td class="mono">0–50</td><td><span class="catdot"><i style="background:#16A34A"></i>Good</span></td><td class="mono">0–30</td><td class="mono">0–1.0</td></tr>
+      <tr><td class="mono">51–100</td><td><span class="catdot"><i style="background:#65A30D"></i>Satisfactory</span></td><td class="mono">31–60</td><td class="mono">1.1–2.0</td></tr>
+      <tr><td class="mono">101–200</td><td><span class="catdot"><i style="background:#CA8A04"></i>Moderately Polluted</span></td><td class="mono">61–90</td><td class="mono">2.1–10</td></tr>
+      <tr><td class="mono">201–300</td><td><span class="catdot"><i style="background:#EA580C"></i>Poor</span></td><td class="mono">91–120</td><td class="mono">10.1–17</td></tr>
+      <tr><td class="mono">301–400</td><td><span class="catdot"><i style="background:#DC2626"></i>Very Poor</span></td><td class="mono">121–250</td><td class="mono">17.1–34</td></tr>
+      <tr><td class="mono">401–500</td><td><span class="catdot"><i style="background:#991B1B"></i>Severe</span></td><td class="mono">&gt;250</td><td class="mono">&gt;34</td></tr></table></div></div>
   <div class="card"><h3>Fan control thresholds</h3><div class="tablewrap">
     <table><tr><th>Stage</th><th>Condition</th><th class="num">Duty</th></tr>
       <tr><td>0 · Standby</td><td>AQI &lt; 90 for 10 min</td><td class="num">0 %</td></tr>
@@ -324,16 +324,16 @@ async function refreshHistory(){
   document.getElementById("res").textContent = j.resolution || "–";
   const d = j.data, L = d.map(r => r.created_at), col = k => d.map(r => r[k]);
   lineChart("c_aqi", L, [
-    {label:"Real-time", data:col("aqi_rt"), color:"#60A5FA", fill:"rgba(96,165,250,.10)"},
-    {label:"Hourly", data:col("aqi_hourly"), color:"#FB923C"},
-    {label:"CPCB-aligned", data:col("aqi_cpcb"), color:"#34D399", dash:[5,4]}], "AQI");
-  lineChart("c_pm", L, [{label:"Corrected", data:col("pm25"), color:"#60A5FA", fill:"rgba(96,165,250,.10)"},
+    {label:"Real-time", data:col("aqi_rt"), color:"#2563EB", fill:"rgba(37,99,235,.08)"},
+    {label:"Hourly", data:col("aqi_hourly"), color:"#EA580C"},
+    {label:"CPCB-aligned", data:col("aqi_cpcb"), color:"#059669", dash:[5,4]}], "AQI");
+  lineChart("c_pm", L, [{label:"Corrected", data:col("pm25"), color:"#2563EB", fill:"rgba(37,99,235,.08)"},
                         {label:"Raw", data:col("pm25_raw"), color:"#94A3B8", dash:[4,3]}], "µg/m³");
-  lineChart("c_co", L, [{label:"CO", data:col("co_mg"), color:"#FB923C", fill:"rgba(251,146,60,.10)"}], "mg/m³");
-  lineChart("c_t", L, [{label:"Temperature", data:col("temperature"), color:"#F472B6"}], "°C");
-  lineChart("c_rh", L, [{label:"Humidity", data:col("humidity"), color:"#38BDF8"}], "%");
-  lineChart("c_sup", L, [{label:"MQ-135 gas", data:col("mq135"), color:"#A78BFA"},
-                         {label:"GP2Y1010 dust", data:col("gpy10"), color:"#34D399", dash:[5,4]}], "ADC counts");
+  lineChart("c_co", L, [{label:"CO", data:col("co_mg"), color:"#EA580C", fill:"rgba(234,88,12,.08)"}], "mg/m³");
+  lineChart("c_t", L, [{label:"Temperature", data:col("temperature"), color:"#DB2777"}], "°C");
+  lineChart("c_rh", L, [{label:"Humidity", data:col("humidity"), color:"#0284C7"}], "%");
+  lineChart("c_sup", L, [{label:"MQ-135 gas", data:col("mq135"), color:"#7C3AED"},
+                         {label:"GP2Y1010 dust", data:col("gpy10"), color:"#059669", dash:[5,4]}], "ADC counts");
   const rows = j.recent;
   if (!rows.length) return;
   let h = `<tr><th>Time (IST)</th><th class="num">PM2.5</th><th class="num">PM10</th><th class="num">CO mg/m³</th><th class="num">CO ppm</th>
@@ -364,7 +364,7 @@ async function refreshLifetime(){
   charts[id] = new Chart(document.getElementById(id), {type:"bar",
     data:{labels:days, datasets:[
       {label:"Daily mean", data:mean, backgroundColor:mean.map(v => cat(v)[1]), borderRadius:4, borderSkipped:"bottom"},
-      {type:"line", label:"Daily max", data:max, borderColor:"#F8FAFC", backgroundColor:"#F8FAFC", borderDash:[4,3], pointRadius:2}]},
+      {type:"line", label:"Daily max", data:max, borderColor:"#0F172A", backgroundColor:"#0F172A", borderDash:[4,3], pointRadius:2}]},
     options:{responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{position:"top", align:"end"}},
       scales:{x:{grid:{display:false}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:10, callback:function(v){return this.getLabelForValue(v).slice(5);}}},
               y:{beginAtZero:true, title:{display:true, text:"AQI"}}}}});
