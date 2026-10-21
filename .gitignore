@@ -10,3 +10,6 @@ venv/
 synthetic_dataset.csv
 *.db-wal
 *.db-shm
+
+# ESP32 Wi-Fi / API secrets (copy secrets.example.h -> secrets.h)
+esp32_firmware/**/secrets.h

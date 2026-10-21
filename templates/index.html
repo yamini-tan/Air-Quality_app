@@ -20,6 +20,14 @@
   .device.offline .big,.device.never .big,.device.unreachable .big{background:var(--bad-soft);color:var(--bad)}
   @media(max-width:900px){.device{grid-template-columns:auto minmax(0,1fr)}.device .facts{grid-column:1/-1}}
 
+  /* one row per sensor board (two-ESP setup) */
+  .boards{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .board{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12.5px;background:var(--card)}
+  .board .led{width:9px;height:9px;border-radius:50%;background:var(--muted);flex-shrink:0}
+  .board.online .led{background:var(--ok)} .board.delayed .led{background:var(--warn)} .board.offline .led{background:var(--bad)}
+  .board b{font-weight:600} .board span{color:var(--muted)}
+  .board.offline{border-color:#FCA5A5;background:var(--bad-soft)}
+
   /* stale data: never present old telemetry as live */
   .stale-note{display:none}
   body.stale .live-val{opacity:.55}
@@ -37,6 +45,13 @@
   .subidx{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
   .subidx div{background:var(--muted-bg);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--muted)}
   .subidx b{display:block;font-size:18px;color:var(--ink);font-family:var(--mono);font-weight:500}
+  .subidx div.main{background:var(--brand-soft);color:var(--brand)} .subidx div.main b{font-weight:700}
+  .inputs{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .inputs .y{color:var(--ok-ink);font-weight:600} .inputs .n{color:var(--bad-ink);font-weight:600}
+  .light{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px}
+  .light i{width:14px;height:14px;border-radius:50%;flex-shrink:0;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+  .light.red i{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+  .light b{font-weight:600}
   .mini{display:flex;flex-direction:column;gap:var(--sp2)}
   .mini .card{padding:14px 16px;flex:1}
   .mini .val{font-size:30px;font-weight:600;font-family:var(--mono);line-height:1.2;margin-top:4px}
@@ -76,6 +91,7 @@
   <div>
     <div class="head" id="dev-head">Checking sensor node…</div>
     <div class="desc" id="dev-desc">Contacting the server.</div>
+    <div class="boards" id="boards" aria-label="Sensor boards"></div>
   </div>
   <dl class="facts">
     <div><dt>Last reading</dt><dd id="dev-last">–</dd></div>
@@ -100,6 +116,7 @@
           <div>PM2.5 sub-index<b id="sub_pm">–</b></div>
           <div>CO sub-index<b id="sub_co">–</b></div>
         </div>
+        <div class="inputs" id="inputs" aria-label="Readings used for this AQI"></div>
       </div>
     </div>
   </div>
@@ -120,6 +137,7 @@
       <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="fan_pb"><div id="fan_bar" style="width:0%"></div></div>
       <div class="small"><b id="fan_duty" class="mono">0</b>% duty · Stage <b id="fan_stage" class="mono">0</b></div>
       <div class="small muted" id="fan_reason"></div>
+      <div class="light live-val" id="led" role="status"><i aria-hidden="true"></i><span>Status light: <b id="led_t">–</b></span></div>
     </div>
     <div class="card">
       <div class="klabel"><svg class="ico" aria-hidden="true"><use href="#i-sparkle"/></svg>12-hour forecast · <span id="fc_model">best model</span></div>
@@ -194,7 +212,10 @@
       <tr><td>0 · Standby</td><td>AQI &lt; 90 for 10 min</td><td class="num">0 %</td></tr>
       <tr><td>1 · Low / pre-emptive</td><td>101 ≤ AQI &lt; 130, or forecast ≥ 130</td><td class="num">50 %</td></tr>
       <tr><td>2 · Full purification</td><td>AQI ≥ 130</td><td class="num">100 %</td></tr></table></div>
-    <div class="small muted" style="margin-top:8px">Thresholds are project design parameters, distinct from the CPCB categories.</div></div>
+    <div class="small muted" style="margin-top:8px">Thresholds are project design parameters, distinct from the CPCB categories.</div>
+    <h3 style="margin-top:14px">Status light</h3>
+    <div class="small">Red when the AQI is above {{ aqi_bad|int }} <b>or</b> the 1-min CO mean is above {{ co_bad_mg }} mg/m³, otherwise green.
+      The HEPA filter removes particles (PM2.5, dust), not CO gas, so high CO also shows an "open a window" alert.</div></div>
 </div>
 {% endblock %}
 
@@ -229,6 +250,12 @@ onDevice((st, s, info) => {
   document.getElementById("dev-id").textContent = info?.device_id ?? "–";
   document.getElementById("dev-src").textContent = SRC[info?.source] ?? info?.source ?? "–";
   document.getElementById("dev-thr").textContent = (info?.offline_after_s ?? 30) + " s";
+  const boards = info?.devices || [], el = Date.now() - DEVICE.fetchedAt;
+  document.getElementById("boards").innerHTML = boards.length < 2 ? "" : boards.map(b => {
+    const bs = b.seconds_ago + Math.floor(el / 1000), bst = bs < (info.offline_after_s ?? 30) ? "online" : (bs < 300 ? "delayed" : "offline");
+    const word = {online:"online", delayed:"delayed", offline:"offline"}[bst];
+    return `<div class="board ${bst}"><i class="led" aria-hidden="true"></i><b>${esc(b.role)}</b><span>${word} · ${ago(bs)}</span></div>`;
+  }).join("");
 });
 
 /* ---------- sensors ---------- */
@@ -275,10 +302,14 @@ async function refreshLatest(){
   cn.style.color = rt.color;
   document.getElementById("dominant").textContent = rt.dominant ?? "–";
   document.getElementById("rtlabel").textContent = rt.label;
-  const deviceAqi = (rt.dominant || "").startsWith("Dust");
-  document.getElementById("subidx").innerHTML = deviceAqi
-    ? `<div style="max-width:280px">Source<b style="font-size:13px;font-family:var(--sans)">Device dust AQI (no PM2.5/CO sensor)</b></div>`
-    : `<div>PM2.5 sub-index<b>${fmt(rt.sub_pm25,0)}</b></div><div>CO sub-index<b>${fmt(rt.sub_co,0)}</b></div>`;
+  // one tile per pollutant score; the biggest one is the AQI ("main cause")
+  const subs = [["PM2.5", "PM2.5 sub-index", rt.sub_pm25], ["CO", "CO sub-index", rt.sub_co]];
+  if (rt.sub_dust != null) subs[0] = ["Dust (device AQI)", "Dust stand-in for PM2.5", rt.sub_dust];
+  document.getElementById("subidx").innerHTML = subs.map(([k, l, v]) =>
+    `<div class="${rt.dominant === k ? "main" : ""}">${l}${rt.dominant === k ? " · main cause" : ""}<b>${fmt(v,0)}</b></div>`).join("");
+  const inp = rt.inputs || {}, yn = (ok, l) => `<span class="${ok ? "y" : "n"}">${ok ? "✓" : "✗"} ${l}</span>`;
+  document.getElementById("inputs").innerHTML = rt.inputs ? "Built from: " + yn(inp.pm25, "PM2.5") + yn(inp.co, "CO") +
+    (!inp.pm25 && inp.dust ? '<span>dust sensor stands in for PM2.5</span>' : "") : "";
   setAQI("aqi_h","aqi_h_cat", j.aqi.hourly);
   const c = j.aqi.cpcb;
   setAQI("aqi_c","aqi_c_cat", c, `<br><span class="muted">coverage: PM ${c.pm_hours}/24 h, CO ${c.co_hours}/8 h</span>`);
@@ -289,6 +320,10 @@ async function refreshLatest(){
   document.getElementById("fan_duty").textContent = f.duty;
   document.getElementById("fan_stage").textContent = f.stage;
   document.getElementById("fan_reason").textContent = f.reason;
+  const led = j.led || {}, red = led.color === "red";
+  document.getElementById("led").className = "light live-val" + (red ? " red" : "");
+  document.getElementById("led_t").textContent = !red ? "Green · air is fine"
+    : led.co_bad ? `Red · CO above ${led.co_bad_above_mg} mg/m³` : `Red · AQI above ${led.aqi_bad_above}`;
   document.getElementById("fc_model").textContent = j.forecast.best_model || "best model";
   const fv = j.forecast.value, fc = cat(fv);
   document.getElementById("fc_val").textContent = fv==null ? "–" : Math.round(fv);
@@ -336,12 +371,12 @@ async function refreshHistory(){
                          {label:"GP2Y1010 dust", data:col("gpy10"), color:"#059669", dash:[5,4]}], "ADC counts");
   const rows = j.recent;
   if (!rows.length) return;
-  let h = `<tr><th>Time (IST)</th><th class="num">PM2.5</th><th class="num">PM10</th><th class="num">CO mg/m³</th><th class="num">CO ppm</th>
+  let h = `<tr><th>Time (IST)</th><th>Board</th><th class="num">PM2.5</th><th class="num">PM10</th><th class="num">CO mg/m³</th><th class="num">CO ppm</th>
            <th class="num">MQ-135</th><th class="num">Dust</th><th class="num">T °C</th><th class="num">RH %</th><th class="num">P hPa</th>
            <th class="num">AQI</th><th>Category</th><th>Dominant</th><th class="num">Fan %</th></tr>`;
   for (const r of rows){
     const cc = cat(r.aqi_rt);
-    h += `<tr><td class="mono">${esc(r.created_at)}</td><td class="num">${fmt(r.pm25)}</td><td class="num">${fmt(r.pm10)}</td><td class="num">${fmt(r.co_mg,2)}</td>
+    h += `<tr><td class="mono">${esc(r.created_at)}</td><td>${esc(r.device_id ?? "–")}</td><td class="num">${fmt(r.pm25)}</td><td class="num">${fmt(r.pm10)}</td><td class="num">${fmt(r.co_mg,2)}</td>
       <td class="num">${fmt(r.co_ppm)}</td><td class="num">${fmt(r.mq135,0)}</td><td class="num">${fmt(r.gpy10,0)}</td><td class="num">${fmt(r.temperature)}</td>
       <td class="num">${fmt(r.humidity)}</td><td class="num">${fmt(r.pressure,1)}</td><td class="num"><b>${r.aqi_rt ?? "–"}</b></td>
       <td><span class="catdot"><i style="background:${cc[1]}"></i>${esc(r.category ?? "–")}</span></td><td>${esc(r.dominant ?? "–")}</td><td class="num">${r.fan_duty ?? "–"}</td></tr>`;

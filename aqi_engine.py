@@ -91,24 +91,24 @@ DEVICE_AQI_LABEL = "Dust (device AQI)"
 
 def aqi_from(pm25: Optional[float], co_mg: Optional[float], device_aqi: Optional[float] = None) -> dict:
     """Eq. (14): AQI = max sub-index, dominant pollutant = argmax.
-    device_aqi: fallback for nodes without PMS5003 / MQ-7 (old firmware reports a
-    GP2Y1010-based AQI); used only when neither PM2.5 nor CO is available."""
+    device_aqi: GP2Y1010 dust-based AQI reported by the node. It stands in for PM2.5
+    whenever no PM2.5 reading is available (old firmware, or the PM2.5 board is offline)."""
     subs = {"PM2.5": sub_index("pm25", pm25), "CO": sub_index("co", co_mg)}
+    dust = None
+    if subs["PM2.5"] is None and device_aqi is not None and not (isinstance(device_aqi, float) and math.isnan(device_aqi)):
+        dust = float(min(max(float(device_aqi), 0), 500))
+        subs[DEVICE_AQI_LABEL] = dust
     valid = {k: v for k, v in subs.items() if v is not None}
-    if not valid and device_aqi is not None and not (isinstance(device_aqi, float) and math.isnan(device_aqi)):
-        aqi = int(round(min(max(float(device_aqi), 0), 500)))
-        name, color = category(aqi)
-        return {"aqi": aqi, "dominant": DEVICE_AQI_LABEL, "category": name, "color": color,
-                "sub_pm25": None, "sub_co": None}
     if not valid:
         return {"aqi": None, "dominant": None, "category": "No data",
-                "color": "#94a3b8", "sub_pm25": None, "sub_co": None}
+                "color": "#94a3b8", "sub_pm25": None, "sub_co": None, "sub_dust": None}
     dominant = max(valid, key=valid.get)
     aqi = int(round(valid[dominant]))
     name, color = category(aqi)
     return {"aqi": aqi, "dominant": dominant, "category": name, "color": color,
             "sub_pm25": None if subs["PM2.5"] is None else round(subs["PM2.5"], 1),
-            "sub_co": None if subs["CO"] is None else round(subs["CO"], 1)}
+            "sub_co": None if subs["CO"] is None else round(subs["CO"], 1),
+            "sub_dust": None if dust is None else round(dust, 1)}
 
 
 def category(aqi: Optional[float]):
@@ -269,9 +269,12 @@ WINDOW = 96      # w = 24 h of 15-min steps
 HORIZON = 48     # h = 12 h
 
 
-def vectorised_aqi(pm25: pd.Series, co: pd.Series) -> pd.Series:
+def vectorised_aqi(pm25: pd.Series, co: pd.Series, device: Optional[pd.Series] = None) -> pd.Series:
+    """Same rule as aqi_from: max sub-index; the dust device AQI stands in where PM2.5 is missing."""
     sp = pm25.map(lambda v: sub_index("pm25", v)).astype(float)   # None -> NaN
     sc = co.map(lambda v: sub_index("co", v)).astype(float)
+    if device is not None:
+        sp = sp.fillna(device.clip(0, 500))
     return pd.concat([sp, sc], axis=1).max(axis=1, skipna=True)
 
 
@@ -293,8 +296,8 @@ def build_timeseries(records: pd.DataFrame) -> pd.DataFrame:
     pm1h = q["pm25"].rolling(4, min_periods=2).mean()
     co1h = q["co_mg"].rolling(4, min_periods=2).mean()
     dev1h = q["aqi_device"].rolling(4, min_periods=2).mean()
-    # CPCB AQI from PM2.5/CO; device AQI only where neither is available (old firmware)
-    q["aqi"] = vectorised_aqi(pm1h, co1h).fillna(dev1h)
+    # CPCB AQI from PM2.5/CO; the dust device AQI stands in where PM2.5 is missing
+    q["aqi"] = vectorised_aqi(pm1h, co1h, dev1h)
     # a sensor that is not installed at all (every value missing) becomes a constant 0 feature
     active = q["aqi"].notna()
     for c in cols:
