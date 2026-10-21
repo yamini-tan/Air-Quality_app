@@ -170,7 +170,11 @@ function deviceState(){ // re-derive locally between polls so the chip degrades 
 function renderChip(){
   const st = deviceState(), chip = document.getElementById("dchip"), s = deviceAgo();
   chip.className = "dchip " + st;
-  const t = st==="online" ? `${DSTATE[st]} · ${ago(s)}` : st==="never" || st==="unreachable" ? DSTATE[st] : `${DSTATE[st]} · ${ago(s)}`;
+  let t = st==="online" ? `${DSTATE[st]} · ${ago(s)}` : st==="never" || st==="unreachable" ? DSTATE[st] : `${DSTATE[st]} · ${ago(s)}`;
+  // two-ESP setup: say how many boards are live, and turn amber if one of them dropped out
+  const bt = DEVICE.info?.boards_total || 0, bo = (DEVICE.info?.devices || []).filter(b =>
+    b.seconds_ago + Math.floor((Date.now()-DEVICE.fetchedAt)/1000) < (DEVICE.info?.offline_after_s ?? 30)).length;
+  if (st==="online" && bt > 1){ t = `${bo} of ${bt} boards online · ${ago(s)}`; if (bo < bt) chip.className = "dchip delayed"; }
   const el = document.getElementById("dchip-text"); if (el.textContent !== t) el.textContent = t;
   DEVICE.listeners.forEach(f => f(st, s, DEVICE.info));
 }

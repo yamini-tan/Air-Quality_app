@@ -21,7 +21,8 @@ air-quality-aws/
 ├── synthetic_data.py       bootstrap data until real PM2.5/CO data exists
 ├── trained_models/         saved models + training_metrics.json + test predictions
 ├── templates/              index.html (live), forecast.html (models), about.html
-├── esp32_firmware/AQMS_ESP32/AQMS_ESP32.ino
+├── esp32_firmware/          AQMS_PM25 (ESP-A, PM2.5) + AQMS_ENV_FAN (ESP-B, CO/climate/fan/LEDs);
+│                           AQMS_ESP32 = older single-board version (see esp32_firmware/README.md)
 ├── tools/simulate_esp32.py fake ESP32, useful for testing the cloud
 ├── deploy/                 setup_ec2.sh, update_existing_vm.sh, aqms.service
 └── legacy/                 your old app.py / train.py / dataset for reference
@@ -71,7 +72,9 @@ Check the load resistor on your MQ-7 module (usually 10 kΩ, some boards 1 kΩ) 
 2. **Tools → Board → Boards Manager**: install **esp32 by Espressif** (3.x; compile-tested on 3.0.7).
 3. **Library Manager**: install **DHT sensor library** (Adafruit), **Adafruit Unified Sensor**,
    **Adafruit BMP280 Library** and **Adafruit BusIO**.
-4. Open `esp32_firmware/AQMS_ESP32/AQMS_ESP32.ino` and edit the top block:
+4. **Two-ESP setup (current hardware):** follow `esp32_firmware/README.md` (sketches `AQMS_PM25` and
+   `AQMS_ENV_FAN`, Wi-Fi and key in `secrets.h`). For the older single-board version, open
+   `esp32_firmware/AQMS_ESP32/AQMS_ESP32.ino` and edit the top block:
    - `WIFI_SSID`, `WIFI_PASSWORD`
    - `SERVER_URL = "http://<your EC2 public IP>:5000/api/ingest"`
    - `API_KEY`: must equal `AQMS_API_KEY` in `deploy/aqms.service`

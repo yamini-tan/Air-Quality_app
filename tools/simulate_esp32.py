@@ -5,6 +5,8 @@ is connected.
 
   python tools/simulate_esp32.py --url http://<EC2_IP>:5000/api/ingest --key aqms-esp32-key
   python tools/simulate_esp32.py --event          # adds a cooking spike to watch the fan react
+  python tools/simulate_esp32.py --two-esp        # two boards: "aqms-pm" (PM2.5) + "aqms-env" (CO, climate, fan)
+  python tools/simulate_esp32.py --two-esp --co-event   # CO rises -> red LED + "open a window" alert
 """
 import argparse
 import math
@@ -19,6 +21,8 @@ ap.add_argument("--key", default="aqms-esp32-key")
 ap.add_argument("--interval", type=float, default=5)
 ap.add_argument("--count", type=int, default=0, help="0 = forever")
 ap.add_argument("--event", action="store_true", help="simulate a cooking event")
+ap.add_argument("--two-esp", action="store_true", help="split frames like the two-ESP hardware")
+ap.add_argument("--co-event", action="store_true", help="simulate a gas-stove CO rise")
 a = ap.parse_args()
 
 seq, i = 0, 0
@@ -40,11 +44,19 @@ while a.count == 0 or i < a.count:
         "pressure": round(912.7 + random.gauss(0, 0.05), 2),
         "fan": 0,
     }
-    try:
-        r = requests.post(a.url, json=frame, headers={"X-API-Key": a.key}, timeout=8)
-        j = r.json()
-        print(f"#{seq} PM2.5 {frame['pm25']:6.1f}  CO {frame['co_ppm']:5.2f} ppm -> {r.status_code} "
-              f"AQI {j.get('aqi')} {j.get('category')} | fan stage {j.get('fan_stage')} ({j.get('fan_duty')}%)")
-    except Exception as e:
-        print("error:", e)
+    if a.co_event:
+        frame["co_ppm"] = round(frame["co_ppm"] + 3.5 * math.exp(-((i % 120) - 30) ** 2 / 300), 2)
+    frames = [frame]
+    if a.two_esp:   # ESP-A sends only PM, ESP-B everything else (and drives the fan)
+        pm_keys = ("pm25", "pm10")
+        frames = [{"device": "aqms-pm", "seq": seq, **{k: frame[k] for k in pm_keys}},
+                  {"device": "aqms-env", "seq": seq, **{k: v for k, v in frame.items() if k not in pm_keys + ("device", "seq")}}]
+    for f in frames:
+        try:
+            r = requests.post(a.url, json=f, headers={"X-API-Key": a.key}, timeout=8)
+            j = r.json()
+            print(f"#{seq} {f['device']:<9} PM2.5 {f.get('pm25', '-'):>6}  CO {f.get('co_ppm', '-'):>5} ppm -> {r.status_code} "
+                  f"AQI {j.get('aqi')} {j.get('category')} | fan stage {j.get('fan_stage')} ({j.get('fan_duty')}%) | LED {j.get('led')}")
+        except Exception as e:
+            print("error:", e)
     time.sleep(a.interval)

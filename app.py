@@ -19,11 +19,16 @@ Environment variables (all optional):
   ENCLOSURE_VOLUME_M3 enclosure volume (default 1)
   FAN_Q_M3_MIN        effective fan airflow (default 0.15)
   CO_EVENT_PPM        CO event alarm threshold (default 20 = MQ-7 lower range)
+  AQI_BAD             status LED red above this AQI (default 100)
+  CO_BAD_MG           status LED red above this 1-min CO mean in mg/m3 (default 2.0)
   DYNAMODB_TABLE      if set, every record is mirrored to this DynamoDB table
   AWS_REGION          region for DynamoDB (default ap-south-1)
   RETENTION_DAYS      raw readings older than this are deleted (default 10); their AQI is
                       archived in table aqi_history and kept forever (see retention.py)
   CLEANUP_EVERY_H     how often the retention cleanup runs (default 6)
+
+Two-ESP setup: ESP-A sends PM2.5 ("aqms-pm"), ESP-B sends CO + climate and drives the
+fan and LEDs ("aqms-env"); see esp32_firmware/README.md.
 """
 
 import json
@@ -62,6 +67,15 @@ DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "")
 RETENTION_DAYS = float(os.environ.get("RETENTION_DAYS", 10))
 CLEANUP_EVERY_H = float(os.environ.get("CLEANUP_EVERY_H", 6))
 OFFLINE_AFTER_S = 30
+AQI_BAD = float(os.environ.get("AQI_BAD", 100))          # red LED above this AQI (CPCB: > 100 = moderately polluted)
+CO_BAD_MG = float(os.environ.get("CO_BAD_MG", 2.0))      # red LED above this 1-min CO mean (CPCB CO sub-index > 100)
+ENV_MAX_AGE_S = 120        # temperature / humidity / pressure from another board are reused for this long
+DEVICE_SHOW_DAYS = 3       # boards seen within this many days are listed in /api/status
+# sensor boards of the two-ESP setup (any other device_id is shown by its id)
+DEVICE_ROLES = {"aqms-pm": "PM2.5 sensor", "aqms-env": "CO, climate sensors + fan",
+                "esp32": "Sensor node (old firmware)"}
+SENSOR_FIELDS = ["pm25_raw", "pm10", "pm25", "co_ppm", "co_mg", "mq135", "gpy10",
+                 "temperature", "humidity", "pressure", "aqi_device"]
 
 IST = timezone(timedelta(hours=5, minutes=30))
 TS_FMT = "%Y-%m-%d %H:%M:%S"
@@ -74,8 +88,11 @@ spike = eng.SpikeFilter(window=5)
 controller = eng.FanController()
 state = {
     "last_seen": 0.0,
-    "last_seq": None,
-    "last_device": None,
+    "last_seq": {},            # device_id -> last seq (duplicate removal per board)
+    "env": {},                 # latest temperature / humidity / pressure from any board (+ time)
+    "mirror_seen": 0.0,        # last direct frame from a board that also writes the PHP API
+    "led": "green",            # status LED command: red when AQI or CO is bad
+    "co_bad": False,
     "forecast": None,          # dict from ForecastBundle.predict
     "forecast_at": None,
     "trend": None,             # per-channel ARIMA trend forecast (Table 6)
@@ -125,6 +142,7 @@ def create_database():
         if col not in have:
             cur.execute(f"ALTER TABLE readings ADD COLUMN {col} {typ}")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_readings_time ON readings(created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_readings_device ON readings(device_id, created_at)")
     retention.ensure_schema(conn)
     conn.commit()
     conn.execute("PRAGMA journal_mode=WAL")   # readers/cleanup don't block ingest
@@ -204,18 +222,29 @@ def process_reading(p: dict, source: str = "esp32") -> dict:
     device = str(p.get("device", p.get("device_id", "esp32")))
 
     with lock:
-        # 2) duplicate removal
-        if seq is not None and state["last_seq"] == seq and state["last_device"] == device:
+        # 2) duplicate removal (per board: two ESPs post in turn)
+        if seq is not None and state["last_seq"].get(device) == seq:
             return {"duplicate": True, **command_payload()}
-        state["last_seq"], state["last_device"] = seq, device
+        state["last_seq"][device] = seq
+        if str(p.get("mirror", "")).lower() in ("1", "true"):
+            state["mirror_seen"] = time.time()
 
         # 3) moving-median spike filter
         pm_f = spike("pm25", raw["pm25_raw"])
         co_f = spike("co", raw["co_ppm"])
 
-        # 4) correction and unit conversion
-        pm25 = None if pm_f is None else round(eng.correct_pm25(pm_f, raw["humidity"]), 2)
-        co_mg = None if co_f is None else round(eng.co_ppm_to_mg(co_f, raw["temperature"], raw["pressure"]), 3)
+        # 4) correction and unit conversion. A board without a climate sensor (the PM2.5 ESP)
+        #    borrows the latest temperature / humidity / pressure sent by the other board.
+        now_s = time.time()
+        for k in ("temperature", "humidity", "pressure"):
+            if raw[k] is not None:
+                state["env"][k] = (raw[k], now_s)
+        env = {k: (v if now_s - t <= ENV_MAX_AGE_S else None) for k, (v, t) in state["env"].items()}
+        temp = raw["temperature"] if raw["temperature"] is not None else env.get("temperature")
+        rh = raw["humidity"] if raw["humidity"] is not None else env.get("humidity")
+        pres = raw["pressure"] if raw["pressure"] is not None else env.get("pressure")
+        pm25 = None if pm_f is None else round(eng.correct_pm25(pm_f, rh), 2)
+        co_mg = None if co_f is None else round(eng.co_ppm_to_mg(co_f, temp, pres), 3)
 
         created_at = now_ist().strftime(TS_FMT)
         rec = {"created_at": created_at, "device_id": device, "seq": fnum(seq),
@@ -244,11 +273,18 @@ def process_reading(p: dict, source: str = "esp32") -> dict:
             fc_val = (fc.get("models", {}).get(best, {}) or {}).get("forecast") if best else None
             controller.update(rt["aqi"], fc_val, time.time())
 
+            # 7) status LED: red when the whole AQI is bad OR the CO reading is bad
+            co_bad = (co1 is not None and co1 > CO_BAD_MG) or (co_f is not None and co_f >= CO_EVENT_PPM)
+            aqi_bad = rt["aqi"] is not None and rt["aqi"] > AQI_BAD
+            state["co_bad"], state["led"] = co_bad, ("red" if (aqi_bad or co_bad) else "green")
+
             alerts = []
             if rt["aqi"] is not None and rt["aqi"] > 200:
                 alerts.append(f"Air quality {rt['category']} (AQI {rt['aqi']})")
             if co_f is not None and co_f >= CO_EVENT_PPM:
                 alerts.append(f"CO event: {co_f:.0f} ppm ({co_mg:.1f} mg/m³) - ventilate, the HEPA filter cannot remove CO")
+            elif co_bad:
+                alerts.append(f"CO is high ({co1:.1f} mg/m³) - open a window. The HEPA filter cleans particles, not CO gas")
 
             upd = {"sub_pm25": rt["sub_pm25"], "sub_co": rt["sub_co"], "aqi_rt": rt["aqi"],
                    "aqi_hourly": hourly["aqi"], "aqi_cpcb": cpcb["aqi"], "dominant": rt["dominant"],
@@ -267,7 +303,8 @@ def process_reading(p: dict, source: str = "esp32") -> dict:
 
 def command_payload():
     return {"ok": True, "fan_stage": controller.stage, "fan_duty": controller.duty,
-            "pwm": controller.pwm, "fan_reason": controller.reason}
+            "pwm": controller.pwm, "fan_reason": controller.reason,
+            "led": state["led"], "co_bad": state["co_bad"]}
 
 
 # =====================================================================
@@ -353,9 +390,12 @@ def poll_legacy_once():
     if age > LEGACY_MAX_AGE_S:
         state["legacy_error"] = f"Sensor offline: newest row in the PHP API is from {data['created_at']}"
         return data, None
+    # a board that posts here directly AND mirrors to the PHP API would be stored twice
+    mirrored = time.time() - state["mirror_seen"] < LEGACY_MAX_AGE_S
     if rid != state["legacy_last_id"]:
         state["legacy_last_id"] = rid
-        result = process_reading(data, source="legacy_api")
+        if not mirrored:
+            result = process_reading(data, source="legacy_api")
     state["legacy_error"] = None
     return data, result
 
@@ -404,7 +444,7 @@ def start_background():
 # =====================================================================
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", aqi_bad=AQI_BAD, co_bad_mg=CO_BAD_MG)
 
 
 @app.route("/forecast")
@@ -453,19 +493,61 @@ def device_status(conn=None):
     conn = conn or get_db()
     try:
         r = conn.execute("SELECT created_at, device_id, source FROM readings ORDER BY id DESC LIMIT 1").fetchone()
+        boards = board_status(conn)
     finally:
         if own:
             conn.close()
     out = {"state": "never", "online": False, "last_reading_at": None, "seconds_ago": None,
            "device_id": None, "source": None, "offline_after_s": OFFLINE_AFTER_S,
-           "detail": state["legacy_error"] if LEGACY_POLL else None}
+           "detail": state["legacy_error"] if LEGACY_POLL else None, "devices": boards}
     if r is None:
         return out
-    ago = max(0, int((now_ist().replace(tzinfo=None) - datetime.strptime(r["created_at"], TS_FMT)).total_seconds()))
-    st = "online" if ago < OFFLINE_AFTER_S else ("delayed" if ago < DELAYED_AFTER_S else "offline")
+    ago = seconds_since(r["created_at"])
+    st = link_state(ago)
     out.update(state=st, online=st == "online", last_reading_at=r["created_at"], seconds_ago=ago,
-               device_id=r["device_id"], source=r["source"])
+               device_id=r["device_id"], source=r["source"],
+               boards_online=sum(b["online"] for b in boards), boards_total=len(boards))
     return out
+
+
+def seconds_since(ts):
+    return max(0, int((now_ist().replace(tzinfo=None) - datetime.strptime(ts, TS_FMT)).total_seconds()))
+
+
+def link_state(ago):
+    return "online" if ago < OFFLINE_AFTER_S else ("delayed" if ago < DELAYED_AFTER_S else "offline")
+
+
+def board_status(conn):
+    """One entry per sensor board seen recently (two-ESP setup: PM2.5 board + CO/climate/fan board)."""
+    since = (now_ist() - timedelta(days=DEVICE_SHOW_DAYS)).strftime(TS_FMT)
+    rows = conn.execute("SELECT device_id, MAX(created_at) last, MAX(id) mid FROM readings "
+                        "WHERE created_at >= ? GROUP BY device_id ORDER BY device_id", (since,)).fetchall()
+    mirrored = time.time() - state["mirror_seen"] < LEGACY_MAX_AGE_S
+    out = []
+    for r in rows:
+        src = conn.execute("SELECT source FROM readings WHERE id=?", (r["mid"],)).fetchone()["source"]
+        if mirrored and src == "legacy_api":
+            continue   # same physical board, now posting directly (its PHP-API copy is skipped)
+        ago = seconds_since(r["last"])
+        st = link_state(ago)
+        out.append({"device_id": r["device_id"], "role": DEVICE_ROLES.get(r["device_id"], r["device_id"]),
+                    "state": st, "online": st == "online", "last_reading_at": r["last"],
+                    "seconds_ago": ago, "source": src})
+    return out
+
+
+def merged_reading(conn, newest):
+    """Newest value of every sensor, whichever board sent it. With two ESPs each row holds only
+    half the sensors, so the newest row alone would show the other board's sensors as missing."""
+    since = (now_ist() - timedelta(seconds=DELAYED_AFTER_S)).strftime(TS_FMT)
+    rows = conn.execute("SELECT * FROM readings WHERE created_at >= ? ORDER BY id DESC LIMIT 400",
+                        (since,)).fetchall()
+    rec = dict(newest)
+    for k in SENSOR_FIELDS:
+        if rec.get(k) is None:
+            rec[k] = next((r[k] for r in rows if r[k] is not None), None)
+    return rec
 
 
 @app.route("/api/status")
@@ -481,9 +563,9 @@ def latest():
         if r is None:
             return jsonify({"success": False, "message": "No readings yet. Waiting for the ESP32...",
                             "online": False, "device": device_status(conn)})
-        rec = row_dict(r)
+        rec = merged_reading(conn, row_dict(r))
         dev = device_status(conn)
-        pm1, co1, *_ = window_means(conn, 60)
+        pm1, co1, n_pm1, n_co1, _ = window_means(conn, 60)
         pmh, coh, *_ = window_means(conn, 3600)
         pm24, _, n24, _, first24 = window_means(conn, 86400)
         _, co8, _, n8, first8 = window_means(conn, 28800)
@@ -501,6 +583,7 @@ def latest():
     fc = state["forecast"] or {}
     best = bundle.best_model if bundle else None
     rt = eng.aqi_from(pm1, co1, dev1)
+    rt["inputs"] = {"pm25": bool(n_pm1), "co": bool(n_co1), "dust": dev1 is not None}
     rt_label = "Real-time (1-min means, used for fan control)"
     if rt["aqi"] is None and rec.get("aqi_rt") is not None:   # no data in the last minute
         name, color = eng.category(rec["aqi_rt"])
@@ -522,6 +605,8 @@ def latest():
         },
         "fan": {"stage": controller.stage, "duty": controller.duty,
                 "name": eng.STAGE_NAME[controller.stage], "reason": controller.reason},
+        "led": {"color": state["led"], "co_bad": state["co_bad"], "aqi_bad_above": AQI_BAD,
+                "co_bad_above_mg": CO_BAD_MG},
         "forecast": {"best_model": best,
                      "value": (fc.get("models", {}).get(best, {}) or {}).get("forecast") if best else None,
                      "computed_at": state["forecast_at"]},

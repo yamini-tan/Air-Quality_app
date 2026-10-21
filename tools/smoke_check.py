@@ -104,6 +104,29 @@ def main():
         code, _, _ = req(base, "/api/ingest", "POST", {"pm25": 1}, {"X-API-Key": "wrong-key"})
         check("wrong API key rejected (401)", code == 401, f"HTTP {code}")
 
+        print("- two ESP boards (PM2.5 board + CO/climate/fan board)")
+        code, _, text = req(base, "/api/ingest", "POST", {"device": "aqms-pm", "seq": 1, "pm25": 45, "pm10": 60},
+                            {"X-API-Key": a.key})
+        check("PM2.5-only frame accepted", code == 200, f"HTTP {code} {text[:120]}")
+        j = {}
+        for i in range(4):   # CO well above the red-LED limit (the spike filter needs repeats)
+            code, _, text = req(base, "/api/ingest", "POST",
+                                {"device": "aqms-env", "seq": i + 1, "co_ppm": 8.0, "mq135": 1500, "gpy10": 420,
+                                 "temperature": 28.0, "humidity": 60.0, "pressure": 912.5, "aqi": 40, "fan": 0},
+                                {"X-API-Key": a.key})
+            j = json.loads(text) if code == 200 else {}
+        check("CO/climate frame returns a fan + LED command", {"fan_stage", "pwm", "led"} <= set(j), str(j)[:160])
+        check("bad CO turns the status LED red", j.get("led") == "red" and j.get("co_bad") is True, str(j)[:160])
+        code, _, text = req(base, "/api/latest")
+        lt = json.loads(text) if code == 200 else {}
+        rd = lt.get("reading") or {}
+        check("dashboard merges both boards (PM2.5 + humidity + CO)",
+              all(rd.get(k) is not None for k in ("pm25", "humidity", "co_mg")), str(rd)[:160])
+        code, _, text = req(base, "/api/status")
+        st = json.loads(text) if code == 200 else {}
+        ids = {d.get("device_id") for d in st.get("devices", [])}
+        check("status lists each board", {"aqms-pm", "aqms-env"} <= ids, f"devices={ids}")
+
     print("- pages")
     page(base, "/", ["AirMonitor", 'id="device"', "/api/latest"])
     page(base, "/forecast", ["AirMonitor", "/api/forecast"])
@@ -116,6 +139,9 @@ def main():
                                         f"ok={j.get('ok')} models={j.get('models_loaded')} errors={j.get('model_errors')}"))
     api(base, "/api/status", lambda j: (j.get("state") in ("online", "delayed", "offline", "never"), f"state={j.get('state')}"))
     latest = api(base, "/api/latest", lambda j: ("success" in j and ("device" in j), f"keys={list(j)[:8]}"))
+    if latest and latest.get("success"):
+        check("api /api/latest has the status LED", (latest.get("led") or {}).get("color") in ("red", "green"),
+              str(latest.get("led")))
     api(base, "/api/history?hours=24", lambda j: (j.get("success") is True and "data" in j, str(j)[:120]))
     api(base, "/api/forecast", lambda j: ("forecast" in j or "message" in j, str(j)[:120]))
     api(base, "/api/aqi_history?days=30", lambda j: (j.get("success") is True, str(j)[:120]))
