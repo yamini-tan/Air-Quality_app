@@ -36,7 +36,9 @@ jobs:
           python tools/seed_fake_data.py --db /tmp/seed_new.db --days 12 --cleanup
           python tools/seed_fake_data.py --db /tmp/seed_old.db --days 12 --legacy --cleanup
       - name: Auto-retrain sees enough data in 12 fake days
-        run: python auto_retrain.py --db /tmp/seed_new.db --dry-run | tee /tmp/retrain.txt && grep -q '"decision": "enough real data' /tmp/retrain.txt
+        run: |
+          python auto_retrain.py --db /tmp/seed_new.db --dry-run | tee /tmp/retrain.txt
+          grep -q 'enough real data' /tmp/retrain.txt
       - name: Pages load and APIs return data (fake ESP32)
         env:
           AQMS_DB: /tmp/seed_new.db
