@@ -1,0 +1,16 @@
+[Unit]
+Description=AQMS: retrain the forecast models once enough real data exists (see auto_retrain.py)
+After=network.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/air-quality-aws
+Environment=AQMS_DB=/data/sensor_data.db
+Environment=TF_CPP_MIN_LOG_LEVEL=3
+EnvironmentFile=-/etc/aqms.env
+ExecStart=/home/ubuntu/air-quality-aws/venv/bin/python auto_retrain.py
+# training must never slow down the dashboard / ingest API
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=4h

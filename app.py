@@ -27,6 +27,8 @@ Environment variables (all optional):
                       archived in table aqi_history and kept forever (see retention.py)
   CLEANUP_EVERY_H     how often the retention cleanup runs (default 6)
 
+Models: trained_models/ is reloaded automatically when auto_retrain.py installs new models.
+
 Two-ESP setup: ESP-A sends PM2.5 ("aqms-pm"), ESP-B sends CO + climate and drives the
 fan and LEDs ("aqms-env"); see esp32_firmware/README.md.
 """
@@ -101,6 +103,7 @@ state = {
     "last_cleanup": None,
 }
 bundle = None
+bundle_mtime = None
 
 
 def now_ist():
@@ -346,12 +349,22 @@ def channel_trend(df):
     return out
 
 
+def models_mtime():
+    try:
+        return os.path.getmtime(os.path.join(MODEL_DIR, "training_metrics.json"))
+    except OSError:
+        return None
+
+
 def forecast_worker():
-    global bundle
+    global bundle, bundle_mtime
     while True:
         try:
-            if bundle is None:
-                bundle = ForecastBundle(MODEL_DIR)
+            # (re)load when auto_retrain.py has installed new models - no restart needed
+            mt = models_mtime()
+            if bundle is None or mt != bundle_mtime:
+                bundle, bundle_mtime = ForecastBundle(MODEL_DIR), mt
+                app.logger.warning("forecast models loaded (%s)", bundle.meta.get("data_source"))
             df = load_recent(48)
             ts = eng.build_timeseries(df) if not df.empty else None
             if ts is not None and ts["aqi"].notna().any():
@@ -718,6 +731,15 @@ def aqi_history():
     return jsonify({"success": True, "resolution": "1h", "data": h.replace({np.nan: None}).to_dict("records")})
 
 
+def auto_retrain_status():
+    """Written by auto_retrain.py (hourly timer on the server)."""
+    try:
+        with open(os.path.join(MODEL_DIR, "auto_retrain_status.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 @app.route("/api/health")
 def health():
     conn = get_db()
@@ -730,6 +752,8 @@ def health():
     return jsonify({"ok": True, "online": time.time() - state["last_seen"] < OFFLINE_AFTER_S,
                     "models_loaded": list(bundle.models.keys()) if bundle else [],
                     "model_errors": bundle.errors if bundle else {},
+                    "models_trained_on": (bundle.meta.get("data_source") if bundle else None),
+                    "auto_retrain": auto_retrain_status(),
                     "db": {"path": DATABASE, **counts, "retention_days": RETENTION_DAYS,
                            "last_cleanup": state["last_cleanup"]}})
 

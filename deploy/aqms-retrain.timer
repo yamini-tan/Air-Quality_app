@@ -1,0 +1,9 @@
+[Unit]
+Description=AQMS: check every hour whether the forecast models should be retrained
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

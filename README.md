@@ -18,6 +18,7 @@ air-quality-aws/
 ├── aqi_engine.py           CPCB AQI, corrections, filters, controller, purification maths
 ├── forecasting.py          model loading + live 12-h inference for all 6 models
 ├── train.py                trains/compares the 5 models (+ persistence)
+├── auto_retrain.py         hourly check: retrains by itself once 7 days of real data exist
 ├── synthetic_data.py       bootstrap data until real PM2.5/CO data exists
 ├── trained_models/         saved models + training_metrics.json + test predictions
 ├── templates/              index.html (live), forecast.html (models), about.html
@@ -132,10 +133,17 @@ sudo systemctl restart aqms                 # after changing code or settings
 
 The shipped models are trained on **synthetic bootstrap data**. The dashboard shows a
 yellow banner while this is the case. **Do not report the synthetic test scores in the paper.**
-After the node has logged at least 7 days of PM2.5/CO:
-```bash
-cd ~/air-quality-aws && AQMS_DB=/data/sensor_data.db ./venv/bin/python train.py --source db && sudo systemctl restart aqms
-```
+**This now happens automatically.** The timer `aqms-retrain.timer` runs `auto_retrain.py` every hour:
+once the database holds 7 days of complete real readings (and at least 200 usable 24-h samples) it
+trains the models on them, installs them (the app reloads them within 60 s) and keeps the previous
+set in `trained_models_prev/`. After that it retrains every 7 days with the newest data.
+Boards that are switched off break the 24-h samples, so leave both ESPs running.
+
+Progress: `GET /api/health` → `auto_retrain` (e.g. "collecting data: 2.3 of 7 days usable").
+On the server: `journalctl -u aqms-retrain -n 50` or
+`AQMS_DB=/data/sensor_data.db ./venv/bin/python auto_retrain.py --dry-run`.
+To train immediately (if there is enough data): `./venv/bin/python auto_retrain.py --force`.
+
 The ML forecast page then shows Table 8 computed from your own data.
 
 ## Data storage and retention
