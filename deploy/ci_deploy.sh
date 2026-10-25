@@ -25,11 +25,16 @@ done
 # models are trained on the server; train once if they are missing
 [ -f trained_models/training_metrics.json ] || venv/bin/python train.py --quick
 
-if ! cmp -s deploy/aqms.service /etc/systemd/system/aqms.service; then
-  sudo cp deploy/aqms.service /etc/systemd/system/aqms.service
-  sudo systemctl daemon-reload
-fi
+# app service + hourly auto-retrain timer (auto_retrain.py)
+changed=0
+for u in aqms.service aqms-retrain.service aqms-retrain.timer; do
+  if ! cmp -s "deploy/$u" "/etc/systemd/system/$u"; then
+    sudo cp "deploy/$u" "/etc/systemd/system/$u"; changed=1
+  fi
+done
+if [ "$changed" = 1 ]; then sudo systemctl daemon-reload; fi
 sudo systemctl enable aqms >/dev/null 2>&1
+sudo systemctl enable --now aqms-retrain.timer >/dev/null 2>&1
 sudo systemctl restart aqms
 
 for i in $(seq 1 30); do

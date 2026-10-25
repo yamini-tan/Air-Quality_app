@@ -13,3 +13,8 @@ synthetic_dataset.csv
 
 # ESP32 Wi-Fi / API secrets (copy secrets.example.h -> secrets.h)
 esp32_firmware/**/secrets.h
+
+# written on the server by auto_retrain.py
+trained_models_new/
+trained_models_prev/
+trained_models/auto_retrain_status.json

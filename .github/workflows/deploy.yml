@@ -30,11 +30,15 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
       - name: Python files compile
-        run: python -m py_compile app.py aqi_engine.py forecasting.py train.py retention.py synthetic_data.py tools/*.py
+        run: python -m py_compile app.py aqi_engine.py forecasting.py train.py auto_retrain.py retention.py synthetic_data.py tools/*.py
       - name: Fake data + retention (new hardware and current firmware formats)
         run: |
           python tools/seed_fake_data.py --db /tmp/seed_new.db --days 12 --cleanup
           python tools/seed_fake_data.py --db /tmp/seed_old.db --days 12 --legacy --cleanup
+      - name: Auto-retrain sees enough data in 12 fake days
+        run: |
+          python auto_retrain.py --db /tmp/seed_new.db --dry-run | tee /tmp/retrain.txt
+          grep -q 'enough real data' /tmp/retrain.txt
       - name: Pages load and APIs return data (fake ESP32)
         env:
           AQMS_DB: /tmp/seed_new.db
@@ -65,13 +69,13 @@ jobs:
           chmod 600 ~/.ssh/ec2.pem
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
       - name: Snapshot the running version (for rollback)
-        run: ssh -i ~/.ssh/ec2.pem "$TARGET" "rsync -a --delete --exclude venv/ --exclude trained_models/ --exclude '*.db*' $APP/ /home/ubuntu/aqms_prev/"
+        run: ssh -i ~/.ssh/ec2.pem "$TARGET" "rsync -a --delete --exclude venv/ --exclude 'trained_models*/' --exclude '*.db*' $APP/ /home/ubuntu/aqms_prev/"
       - name: Upload code (keeps database, venv and server-trained models)
         run: |
           rsync -az --delete -e "ssh -i ~/.ssh/ec2.pem" \
             --exclude '.git/' --exclude '.github/' --exclude 'venv/' \
             --exclude '*.db' --exclude '*.db-journal' --exclude '*.db-wal' --exclude '*.db-shm' \
-            --exclude 'trained_models/' --exclude '.requirements*.sha' --exclude '__pycache__/' \
+            --exclude 'trained_models*/' --exclude '.requirements*.sha' --exclude '__pycache__/' \
             ./ "$TARGET:$APP/"
       - name: Install, restart, health check
         run: ssh -i ~/.ssh/ec2.pem "$TARGET" "bash $APP/deploy/ci_deploy.sh"
@@ -81,5 +85,5 @@ jobs:
         if: failure()
         run: |
           echo "Deploy or live check failed - restoring the previous version"
-          ssh -i ~/.ssh/ec2.pem "$TARGET" "test -d /home/ubuntu/aqms_prev && rsync -a --delete --exclude venv/ --exclude trained_models/ --exclude '*.db*' /home/ubuntu/aqms_prev/ $APP/ && bash $APP/deploy/ci_deploy.sh"
+          ssh -i ~/.ssh/ec2.pem "$TARGET" "test -d /home/ubuntu/aqms_prev && rsync -a --delete --exclude venv/ --exclude 'trained_models*/' --exclude '*.db*' /home/ubuntu/aqms_prev/ $APP/ && bash $APP/deploy/ci_deploy.sh"
           python3 tools/smoke_check.py --url "http://${{ secrets.EC2_HOST }}:5000" --wait 90

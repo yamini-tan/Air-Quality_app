@@ -34,9 +34,10 @@ else
   ./venv/bin/python train.py --no-dl
 fi
 
-sudo cp deploy/aqms.service /etc/systemd/system/aqms.service
+sudo cp deploy/aqms.service deploy/aqms-retrain.service deploy/aqms-retrain.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now aqms
+sudo systemctl enable --now aqms-retrain.timer
 sleep 5
 curl -s http://127.0.0.1:5000/api/health && echo
 echo "Done. Open http://<EC2_PUBLIC_IP>:5000  (security group must allow TCP 5000)"

@@ -16,6 +16,7 @@ Usage
   python train.py --source csv --csv my_export.csv
   python train.py --source synthetic    # bootstrap models (NOT for the paper)
   python train.py --quick               # smaller search (for small VMs)
+  python auto_retrain.py                # what the server runs every hour (see that file)
 """
 
 import argparse
@@ -92,8 +93,10 @@ def main():
     ap.add_argument("--db", default=os.environ.get("AQMS_DB", "sensor_data.db"))
     ap.add_argument("--quick", action="store_true", help="reduced search space")
     ap.add_argument("--no-dl", action="store_true", help="skip LSTM/GRU (no TensorFlow)")
+    ap.add_argument("--out", help="save the models here instead of trained_models/ (auto_retrain.py)")
     args = ap.parse_args()
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    out_dir = args.out or MODEL_DIR
+    os.makedirs(out_dir, exist_ok=True)
 
     print("=" * 60 + "\n  AQMS 12-HOUR AQI FORECAST - MODEL TRAINING\n" + "=" * 60)
     records, kind, source_note = load_records(args.source, args.csv, args.db)
@@ -180,7 +183,7 @@ def main():
     preds_te["Random Forest"] = rf.predict(Xte)
     results["Random Forest"] = metrics(y_te, preds_te["Random Forest"])
     configs["Random Forest"] = f"trees = {trees}, depth = {depth or 'full'}"
-    joblib.dump(rf, os.path.join(MODEL_DIR, "random_forest.joblib"), compress=3)
+    joblib.dump(rf, os.path.join(out_dir, "random_forest.joblib"), compress=3)
     print("  best", configs["Random Forest"], "->", results["Random Forest"])
 
     # ---------------- XGBoost ----------------
@@ -205,7 +208,7 @@ def main():
     preds_te["XGBoost"] = xg.predict(Xte)
     results["XGBoost"] = metrics(y_te, preds_te["XGBoost"])
     configs["XGBoost"] = f"eta = {eta}, depth = {depth}, trees = {trees}"
-    xg.save_model(os.path.join(MODEL_DIR, "xgboost.json"))
+    xg.save_model(os.path.join(out_dir, "xgboost.json"))
     print("  best", configs["XGBoost"], "->", results["XGBoost"])
 
     # ---------------- Sequence data (scalers on train only) ----------------
@@ -218,8 +221,8 @@ def main():
     histories = {}
 
     for fn in ("lstm.keras", "gru.keras"):          # remove stale recurrent models
-        if os.path.exists(os.path.join(MODEL_DIR, fn)):
-            os.remove(os.path.join(MODEL_DIR, fn))
+        if os.path.exists(os.path.join(out_dir, fn)):
+            os.remove(os.path.join(out_dir, fn))
     if not args.no_dl:
         try:
             import tensorflow as tf
@@ -261,7 +264,7 @@ def main():
                 preds_te[cell] = np.clip(tgt_scaler.inverse(m.predict(Ste, verbose=0)).ravel(), 0, 500)
                 results[cell] = metrics(y_te, preds_te[cell])
                 configs[cell] = f"layers = {layers}, units = {units}, dropout = 0.2"
-                m.save(os.path.join(MODEL_DIR, f"{cell.lower()}.keras"))
+                m.save(os.path.join(out_dir, f"{cell.lower()}.keras"))
                 print("  best", configs[cell], "->", results[cell])
         except ImportError:
             print("\nTensorFlow not installed - LSTM/GRU skipped.")
@@ -305,7 +308,7 @@ def main():
             "arima": {"order": list(order), "params": params},
         },
     }
-    with open(os.path.join(MODEL_DIR, "training_metrics.json"), "w") as f:
+    with open(os.path.join(out_dir, "training_metrics.json"), "w") as f:
         json.dump(meta, f, indent=2)
 
     # test predictions for the dashboard chart
@@ -313,7 +316,7 @@ def main():
     out = pd.DataFrame({"target_time": te_idx, "actual": y_te})
     for k, v in preds_te.items():
         out[k] = np.round(v, 2)
-    out.to_csv(os.path.join(MODEL_DIR, "test_predictions.csv"), index=False)
+    out.to_csv(os.path.join(out_dir, "test_predictions.csv"), index=False)
 
     # Fig 4(c)-style comparison chart
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -327,8 +330,8 @@ def main():
     ax.legend(frameon=False)
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
-    fig.savefig(os.path.join(MODEL_DIR, "model_comparison.png"), dpi=150)
-    print("\nSaved models and metrics to", MODEL_DIR)
+    fig.savefig(os.path.join(out_dir, "model_comparison.png"), dpi=150)
+    print("\nSaved models and metrics to", out_dir)
 
 
 if __name__ == "__main__":
