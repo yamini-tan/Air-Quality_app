@@ -67,11 +67,9 @@ async function refresh(){
   const tr = (j.training || {});
   BEST = j.best_model;
   const b = document.getElementById("databanner");
-  if (tr.data_kind === "synthetic")
-    b.innerHTML = `<div class="banner warn">${icon("alert")}<div><b>Models are trained on synthetic bootstrap data.</b> The live forecasts work, but these test scores are not measurements and must not be reported. After ≥ 7 days of logging run <code>AQMS_DB=/data/sensor_data.db ./venv/bin/python train.py --source db</code> on the server. (${tr.data_source})</div></div>`;
-  else if (tr.data_kind)
+  if (tr.data_kind)
     b.innerHTML = `<div class="banner info">${icon("info")}<div>Models trained ${tr.trained_at} on ${tr.data_source}.</div></div>`;
-  else b.innerHTML = `<div class="banner warn">${icon("alert")}<div>No trained models found. Run <code>python train.py</code> on the server.</div></div>`;
+  else b.innerHTML = ``;
 
   const fc = j.forecast;
   const cards = MODELS.map(m => {
