@@ -10,8 +10,8 @@ Environment=AQMS_API_KEY=aqms-esp32-key
 Environment=LEGACY_POLL=1
 # database on the separate EBS data volume mounted at /data (survives instance replacement)
 Environment=AQMS_DB=/data/sensor_data.db
-# raw readings kept 10 days (>= 7 needed for retraining); AQI kept forever in aqi_history
-Environment=RETENTION_DAYS=10
+# raw readings kept 365 days; AQI kept forever in aqi_history
+Environment=RETENTION_DAYS=365
 Environment=ROOM_VOLUME_M3=30
 Environment=TF_CPP_MIN_LOG_LEVEL=3
 # server-only overrides (e.g. a private AQMS_API_KEY) - not in git, optional
