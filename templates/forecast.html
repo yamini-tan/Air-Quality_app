@@ -67,9 +67,7 @@ async function refresh(){
   const tr = (j.training || {});
   BEST = j.best_model;
   const b = document.getElementById("databanner");
-  if (tr.data_kind)
-    b.innerHTML = `<div class="banner info">${icon("info")}<div>Models trained ${tr.trained_at} on ${tr.data_source}.</div></div>`;
-  else b.innerHTML = ``;
+  b.innerHTML = ``;
 
   const fc = j.forecast;
   const cards = MODELS.map(m => {
