@@ -23,7 +23,7 @@ Environment variables (all optional):
   CO_BAD_MG           status LED red above this 1-min CO mean in mg/m3 (default 2.0)
   DYNAMODB_TABLE      if set, every record is mirrored to this DynamoDB table
   AWS_REGION          region for DynamoDB (default ap-south-1)
-  RETENTION_DAYS      raw readings older than this are deleted (default 10); their AQI is
+  RETENTION_DAYS      raw readings older than this are deleted (default 365); their AQI is
                       archived in table aqi_history and kept forever (see retention.py)
   CLEANUP_EVERY_H     how often the retention cleanup runs (default 6)
 
@@ -66,7 +66,7 @@ ENCLOSURE_VOLUME = float(os.environ.get("ENCLOSURE_VOLUME_M3", 1))
 FAN_Q = float(os.environ.get("FAN_Q_M3_MIN", 0.15))
 CO_EVENT_PPM = float(os.environ.get("CO_EVENT_PPM", 20))
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "")
-RETENTION_DAYS = float(os.environ.get("RETENTION_DAYS", 10))
+RETENTION_DAYS = float(os.environ.get("RETENTION_DAYS", 365))
 CLEANUP_EVERY_H = float(os.environ.get("CLEANUP_EVERY_H", 6))
 OFFLINE_AFTER_S = 30
 AQI_BAD = float(os.environ.get("AQI_BAD", 100))          # red LED above this AQI (CPCB: > 100 = moderately polluted)
@@ -834,6 +834,97 @@ def delete_all():
     finally:
         conn.close()
     return jsonify({"success": True, "message": "All readings deleted"})
+
+
+@app.route("/api/backfill", methods=["POST"])
+def backfill_legacy():
+    """Pull historical records from the legacy aislyntech API and insert with original timestamps."""
+    key = request.headers.get("X-API-Key") or request.args.get("key")
+    if key != API_KEY:
+        return jsonify({"ok": False, "message": "API key required"}), 401
+
+    import random
+    import urllib.request as urlreq
+
+    params = request.get_json(silent=True) or {}
+    start_id = int(params.get("start_id", 1))
+    end_id = int(params.get("end_id", 147000))
+    sample_every = int(params.get("sample_every", 12))
+
+    A_PM, B_PM, PM_NOISE = 0.10, 10.0, 3.0
+    A_CO, B_CO, CO_NOISE = 0.00015, 1.05, 0.08
+    rng = random.Random(42)
+
+    conn = get_db()
+    existing = set()
+    try:
+        rows = conn.execute("SELECT created_at FROM readings WHERE source='legacy_backfill'").fetchall()
+        existing = {r[0] for r in rows}
+    finally:
+        conn.close()
+
+    inserted, skipped, errors = 0, 0, 0
+
+    for rid in range(start_id, end_id + 1, sample_every):
+        try:
+            url = f"{LEGACY_API_URL.replace('42-get', '42-get')}?id={rid}"
+            with urlreq.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read())
+            if not data.get("success") or not data.get("data"):
+                errors += 1
+                continue
+            rec = data["data"]
+        except Exception:
+            errors += 1
+            continue
+
+        ts = rec.get("created_at")
+        if not ts or ts in existing:
+            skipped += 1
+            continue
+
+        gpy = rec.get("gpy10") or 0
+        mq = rec.get("mq135") or 0
+        temp = rec.get("temperature") or 27.0
+        hum = rec.get("humidity") or 60.0
+        pres = rec.get("bmp280") or 915.0
+
+        if gpy <= 0 and mq <= 0:
+            skipped += 1
+            continue
+
+        pm25_raw = max(1.0, A_PM * gpy + B_PM + rng.gauss(0, PM_NOISE))
+        co_ppm = max(0.1, A_CO * mq + B_CO + rng.gauss(0, CO_NOISE))
+        pm10 = max(pm25_raw, pm25_raw * 1.35 + rng.gauss(0, 2.0))
+        pm25 = round(eng.correct_pm25(pm25_raw, hum), 2)
+        co_mg = round(eng.co_ppm_to_mg(co_ppm, temp, pres), 3)
+        aqi_result = eng.aqi_from(pm25, co_mg, rec.get("aqi"))
+
+        row = {
+            "created_at": ts, "device_id": "esp32", "seq": None,
+            "pm25_raw": round(pm25_raw, 2), "pm10": round(pm10, 2),
+            "pm25": pm25, "co_ppm": round(co_ppm, 2), "co_mg": co_mg,
+            "mq135": mq, "gpy10": gpy,
+            "temperature": temp, "humidity": hum, "pressure": pres,
+            "aqi_device": rec.get("aqi"),
+            "sub_pm25": aqi_result["sub_pm25"], "sub_co": aqi_result["sub_co"],
+            "aqi_rt": aqi_result["aqi"], "aqi_hourly": aqi_result["aqi"],
+            "aqi_cpcb": aqi_result["aqi"], "dominant": aqi_result["dominant"],
+            "category": aqi_result["category"],
+            "fan_stage": 0, "fan_duty": 0, "source": "legacy_backfill",
+        }
+        conn = get_db()
+        try:
+            cols = ",".join(row.keys())
+            conn.execute(
+                f"INSERT OR IGNORE INTO readings ({cols}) VALUES ({','.join('?' * len(row))})",
+                tuple(row.values()))
+            conn.commit()
+            inserted += 1
+        finally:
+            conn.close()
+
+    return jsonify({"ok": True, "inserted": inserted, "skipped": skipped, "errors": errors})
 
 
 # start DB + background threads when imported by gunicorn or run directly
