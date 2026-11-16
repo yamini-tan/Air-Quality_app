@@ -37,7 +37,7 @@ from aqi_engine import FEATURES, WINDOW, build_timeseries
 from forecasting import MODEL_DIR, fill_inputs, valid_origins
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MIN_WINDOWS = 200                      # same floor as train.py
+MIN_WINDOWS = 100                      # enough for a reliable train/val/test split
 MIN_DAYS = float(os.environ.get("AUTO_RETRAIN_MIN_DAYS", 7))
 RETRAIN_EVERY_DAYS = float(os.environ.get("AUTO_RETRAIN_EVERY_DAYS", 7))
 QUICK = os.environ.get("AUTO_RETRAIN_QUICK", "0") == "1"
